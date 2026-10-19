@@ -8,11 +8,13 @@ use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
 use b9x_ble::control::{self, LedChange};
-use b9x_ble::{Device, LinkState, WriteMode, fake};
+use b9x_ble::{Device, Found, LinkState, WriteMode, fake};
 use b9x_proto::{LedSettings, Mode, Preset, ShutdownInfo, Status};
 use tokio::sync::oneshot;
 
 pub const SCAN_TIMEOUT: Duration = Duration::from_secs(10);
+/// After the first B9X shows up, keep scanning this long for others to choose from.
+pub const SCAN_SETTLE: Duration = Duration::from_millis(2500);
 
 pub enum Cmd {
     Connect {
@@ -48,17 +50,26 @@ pub enum Event {
     Curve(Vec<u8>),
     Shutdown(ShutdownInfo),
     Error(String),
+    /// More than one B9X answered the scan; the user picks one.
+    Choose(Vec<Found>),
     /// SIGINT, SIGTERM or SIGHUP arrived.
     Quit,
 }
 
+/// What a connection attempt ended with.
+enum Opened {
+    Device(Arc<Device>),
+    Choose(Vec<Found>),
+}
+
 /// What ended a connection attempt.
 enum Attempt {
-    Done(b9x_ble::Result<Arc<Device>>),
+    Done(b9x_ble::Result<Opened>),
     Cancelled(Option<oneshot::Sender<()>>),
 }
 
-pub async fn run(cmds: Receiver<Cmd>, events: Sender<Event>) {
+/// `fake_devices` is how many simulated coolers a scan finds, to try the picker.
+pub async fn run(cmds: Receiver<Cmd>, events: Sender<Event>, fake_devices: usize) {
     let mut dev: Option<Arc<Device>> = None;
     while let Ok(cmd) = cmds.recv().await {
         if let Cmd::Connect { address, fake } = cmd {
@@ -68,7 +79,7 @@ pub async fn run(cmds: Receiver<Cmd>, events: Sender<Event>) {
             // Scanning and connecting can take half a minute; Disconnect and Quit
             // must not wait behind it.
             let attempt = {
-                let mut connecting = std::pin::pin!(connect(address.clone(), fake, &events));
+                let mut connecting = std::pin::pin!(connect(address.clone(), fake, fake_devices, &events));
                 loop {
                     tokio::select! {
                         r = &mut connecting => break Attempt::Done(r),
@@ -82,9 +93,12 @@ pub async fn run(cmds: Receiver<Cmd>, events: Sender<Event>) {
                 }
             };
             match attempt {
-                Attempt::Done(Ok(d)) => {
+                Attempt::Done(Ok(Opened::Device(d))) => {
                     tokio::spawn(forward(d.clone(), events.clone()));
                     dev = Some(d);
+                }
+                Attempt::Done(Ok(Opened::Choose(found))) => {
+                    let _ = events.send(Event::Choose(found)).await;
                 }
                 Attempt::Done(Err(e)) => {
                     let _ = events.send(Event::Disconnected(None)).await;
@@ -165,7 +179,35 @@ async fn handle(dev: &mut Option<Arc<Device>>, cmd: Cmd, events: &Sender<Event>)
 
 /// Open the device and read what the window shows. Dropping this future before it
 /// finishes drops the link, which closes it.
-async fn connect(address: Option<String>, fake: bool, events: &Sender<Event>) -> b9x_ble::Result<Arc<Device>> {
+async fn connect(
+    address: Option<String>,
+    fake: bool,
+    fake_devices: usize,
+    events: &Sender<Event>,
+) -> b9x_ble::Result<Opened> {
+    let address = match (address, fake) {
+        (Some(a), _) => Some(a),
+        (None, true) if fake_devices > 1 => {
+            let found = (0..fake_devices)
+                .map(|i| Found {
+                    address: format!("00:00:00:00:B9:{:02X}", 0x0f + i),
+                    name: "fake B9X".into(),
+                    rssi: Some(-50 - 5 * i as i16),
+                })
+                .collect();
+            return Ok(Opened::Choose(found));
+        }
+        (None, true) => None,
+        (None, false) => {
+            let _ = events.send(Event::Connecting("Looking for a B9X…".into())).await;
+            let mut found = b9x_ble::find_all(SCAN_TIMEOUT, SCAN_SETTLE).await?;
+            match found.len() {
+                0 => return Err(b9x_ble::not_found()),
+                1 => Some(found.remove(0).address),
+                _ => return Ok(Opened::Choose(found)),
+            }
+        }
+    };
     let d = Arc::new(open(address, fake, events).await?);
     let mac = d.mac().await?;
     let send = |e: Event| async move {
@@ -176,20 +218,15 @@ async fn connect(address: Option<String>, fake: bool, events: &Sender<Event>) ->
     send(Event::Led(d.led(0).await?)).await;
     send(Event::Curve(d.curve().await?)).await;
     send(Event::Shutdown(d.shutdown().await?)).await;
-    Ok(d)
+    Ok(Opened::Device(d))
 }
 
+/// The simulated device always answers as [`fake::ADDRESS`], whichever was picked.
 async fn open(address: Option<String>, fake: bool, events: &Sender<Event>) -> b9x_ble::Result<Device> {
     if fake {
         return Device::open(fake::connect(Duration::from_secs(1)), false).await;
     }
-    let address = match address {
-        Some(a) => a,
-        None => {
-            let _ = events.send(Event::Connecting("Looking for a B9X…".into())).await;
-            b9x_ble::find(SCAN_TIMEOUT).await?
-        }
-    };
+    let address = address.ok_or_else(b9x_ble::not_found)?;
     let _ = events.send(Event::Connecting(format!("Connecting to {address}…"))).await;
     Device::open(b9x_ble::connect(&address, WriteMode::Request, SCAN_TIMEOUT).await?, false).await
 }
@@ -253,7 +290,7 @@ mod tests {
     fn spawn() -> (Sender<Cmd>, Receiver<Event>, tokio::task::JoinHandle<()>) {
         let (cmd_tx, cmd_rx) = async_channel::unbounded();
         let (ev_tx, ev_rx) = async_channel::unbounded();
-        (cmd_tx, ev_rx, tokio::spawn(run(cmd_rx, ev_tx)))
+        (cmd_tx, ev_rx, tokio::spawn(run(cmd_rx, ev_tx, 1)))
     }
 
     async fn next_matching(events: &Receiver<Event>, f: impl Fn(&Event) -> bool) -> Event {
@@ -295,5 +332,19 @@ mod tests {
         // The curve is refused outside Custom instead of switching back to it.
         tx.send(Cmd::Curve(vec![5; 9])).await.unwrap();
         next_matching(&events, |e| matches!(e, Event::Error(_))).await;
+    }
+
+    #[tokio::test]
+    async fn several_coolers_offer_a_choice() {
+        let (cmd_tx, cmd_rx) = async_channel::unbounded();
+        let (ev_tx, events) = async_channel::unbounded();
+        tokio::spawn(run(cmd_rx, ev_tx, 2));
+        cmd_tx.send(Cmd::Connect { address: None, fake: true }).await.unwrap();
+        let e = next_matching(&events, |e| matches!(e, Event::Choose(_) | Event::Connected { .. })).await;
+        let Event::Choose(found) = e else { panic!("connected without asking") };
+        assert_eq!(found.len(), 2);
+        // Picking one connects to it.
+        cmd_tx.send(Cmd::Connect { address: Some(found[1].address.clone()), fake: true }).await.unwrap();
+        next_matching(&events, |e| matches!(e, Event::Connected { .. })).await;
     }
 }

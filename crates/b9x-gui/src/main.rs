@@ -44,7 +44,9 @@ fn main() -> glib::ExitCode {
     let (ev_tx, ev_rx) = async_channel::unbounded();
     // Quit through the normal path on signals so the link gets closed below.
     runtime.spawn(worker::quit_on_signal(ev_tx.clone()));
-    runtime.spawn(worker::run(cmd_rx, ev_tx));
+    // Development aid: how many simulated coolers --fake finds, to try the picker.
+    let fake_devices = std::env::var("B9X_FAKE_DEVICES").ok().and_then(|n| n.parse().ok()).unwrap_or(1);
+    runtime.spawn(worker::run(cmd_rx, ev_tx, fake_devices));
 
     let app = adw::Application::builder().application_id(APP_ID).build();
     let tx = cmd_tx.clone();

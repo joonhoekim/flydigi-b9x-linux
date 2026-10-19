@@ -57,12 +57,12 @@ async fn set_le_filter(adapter: &Adapter) -> Result<()> {
     Ok(adapter.set_discovery_filter(filter).await?)
 }
 
-/// Run LE discovery until `timeout`, or until `stop` accepts a device.
-async fn discover(adapter: &Adapter, timeout: Duration, mut stop: impl FnMut(&Found) -> bool) -> Result<Vec<Found>> {
+/// Run LE discovery until `timeout`, or until `settle` after the first B9X shows up.
+async fn discover(adapter: &Adapter, timeout: Duration, settle: Option<Duration>) -> Result<Vec<Found>> {
     set_le_filter(adapter).await?;
     let events = adapter.discover_devices_with_changes().await?;
     pin_mut!(events);
-    let deadline = Instant::now() + timeout;
+    let mut deadline = Instant::now() + timeout;
     let mut seen: HashMap<Address, Found> = HashMap::new();
     while let Ok(Some(ev)) = timeout_at(deadline, events.next()).await {
         let AdapterEvent::DeviceAdded(addr) = ev else { continue };
@@ -74,11 +74,10 @@ async fn discover(adapter: &Adapter, timeout: Duration, mut stop: impl FnMut(&Fo
         if found.rssi.is_none() {
             continue;
         }
-        let done = stop(&found);
-        seen.insert(addr, found);
-        if done {
-            break;
+        if let (Some(settle), true) = (settle, seen.is_empty()) {
+            deadline = deadline.min(Instant::now() + settle);
         }
+        seen.insert(addr, found);
     }
     let mut found: Vec<Found> = seen.into_values().collect();
     found.sort_by_key(|f| std::cmp::Reverse(f.rssi));
@@ -87,17 +86,23 @@ async fn discover(adapter: &Adapter, timeout: Duration, mut stop: impl FnMut(&Fo
 
 /// B9X coolers seen within `timeout`, strongest signal first.
 pub async fn scan(timeout: Duration) -> Result<Vec<Found>> {
-    discover(&adapter().await?, timeout, |_| false).await
+    discover(&adapter().await?, timeout, None).await
+}
+
+/// B9X coolers seen until `settle` after the first one, or empty after `timeout`.
+/// For offering a choice without waiting out the whole scan.
+pub async fn find_all(timeout: Duration, settle: Duration) -> Result<Vec<Found>> {
+    discover(&adapter().await?, timeout, Some(settle)).await
 }
 
 /// Address of the first B9X that shows up.
 pub async fn find(timeout: Duration) -> Result<String> {
-    let found = discover(&adapter().await?, timeout, |_| true).await?;
-    found
-        .into_iter()
-        .next()
-        .map(|f| f.address)
-        .ok_or_else(|| Error::NotFound("no B9X found; is it on and not connected to the phone app?".into()))
+    let found = find_all(timeout, Duration::ZERO).await?;
+    found.into_iter().next().map(|f| f.address).ok_or_else(not_found)
+}
+
+pub fn not_found() -> Error {
+    Error::NotFound("no B9X found; is it on and not connected to the phone app?".into())
 }
 
 async fn characteristic(dev: &bluer::Device, uuid: u128) -> Result<Characteristic> {

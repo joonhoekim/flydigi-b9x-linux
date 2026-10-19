@@ -21,9 +21,9 @@ pub mod fake;
 
 // Each OS gets its own backend module with `scan`, `find` and `connect`.
 #[cfg(target_os = "linux")]
-pub use bluez::{connect, disconnect, find, scan};
+pub use bluez::{connect, disconnect, find, find_all, not_found, scan};
 #[cfg(not(target_os = "linux"))]
-pub use unsupported::{connect, disconnect, find, scan};
+pub use unsupported::{connect, disconnect, find, find_all, not_found, scan};
 
 #[cfg(not(target_os = "linux"))]
 mod unsupported {
@@ -39,6 +39,14 @@ mod unsupported {
 
     pub async fn find(_timeout: Duration) -> Result<String> {
         no_backend()
+    }
+
+    pub async fn find_all(_timeout: Duration, _settle: Duration) -> Result<Vec<Found>> {
+        no_backend()
+    }
+
+    pub fn not_found() -> Error {
+        Error::NotFound("no B9X found".into())
     }
 
     pub async fn connect(_address: &str, _mode: WriteMode, _scan_timeout: Duration) -> Result<Link> {

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use async_channel::Sender;
+use b9x_ble::Found;
 use b9x_ble::control::{LedChange, OC_WARNING};
 use b9x_proto::{self as p, LedSettings, Mode, Preset, ShutdownInfo, Status};
 use gtk::{gdk, glib};
@@ -44,6 +45,7 @@ pub struct Ui {
     stack: gtk::Stack,
     idle_page: adw::StatusPage,
     busy_label: gtk::Label,
+    pick_list: gtk::ListBox,
     disconnect_btn: gtk::Button,
 
     temp_label: gtk::Label,
@@ -178,6 +180,21 @@ impl Ui {
         busy.append(&spinner);
         busy.append(&busy_label);
         busy.append(&cancel_btn);
+
+        // --- several coolers nearby ---
+        let pick_list =
+            gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        let rescan_btn =
+            gtk::Button::builder().label("Scan Again").halign(gtk::Align::Center).css_classes(["pill"]).build();
+        let pick_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).build();
+        pick_box.append(&pick_list);
+        pick_box.append(&rescan_btn);
+        let pick_page = adw::StatusPage::builder()
+            .icon_name("bluetooth-symbolic")
+            .title("Choose a Cooler")
+            .description("More than one B9X is nearby. The strongest signal is usually the closest.")
+            .child(&adw::Clamp::builder().maximum_size(420).child(&pick_box).build())
+            .build();
 
         // --- status ---
         let temp_label = gtk::Label::builder().css_classes(["title-1", "numeric"]).label("–").build();
@@ -346,6 +363,7 @@ impl Ui {
         let stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
         stack.add_named(&idle_page, Some("idle"));
         stack.add_named(&busy, Some("busy"));
+        stack.add_named(&pick_page, Some("pick"));
         stack.add_named(&page, Some("main"));
 
         let disconnect_btn = gtk::Button::builder()
@@ -374,6 +392,7 @@ impl Ui {
             stack,
             idle_page,
             busy_label,
+            pick_list,
             disconnect_btn,
             temp_label,
             temp_sub,
@@ -405,7 +424,7 @@ impl Ui {
             firmware_row,
             mac_row,
         });
-        ui.connect_signals(&connect_btn, &cancel_btn);
+        ui.connect_signals(&connect_btn, &cancel_btn, &rescan_btn);
         ui
     }
 
@@ -468,20 +487,47 @@ impl Ui {
         self.timers.borrow().iter().any(|(k, _)| *k == key)
     }
 
+    /// Connect as asked on the command line: to the given address, or by scanning.
     pub fn connect(&self) {
-        let (address, fake) = self.connect_args.clone();
+        self.connect_to(self.connect_args.0.clone());
+    }
+
+    fn connect_to(&self, address: Option<String>) {
         self.busy_label.set_label("Connecting…");
         self.stack.set_visible_child_name("busy");
-        self.send(Cmd::Connect { address, fake });
+        self.send(Cmd::Connect { address, fake: self.connect_args.1 });
+    }
+
+    fn show_choice(self: &Rc<Self>, found: &[Found]) {
+        while let Some(row) = self.pick_list.first_child() {
+            self.pick_list.remove(&row);
+        }
+        for f in found {
+            let signal = f.rssi.map_or(String::new(), |r| format!(" · {r} dBm"));
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(&f.name))
+                .subtitle(format!("{}{signal}", f.address))
+                .activatable(true)
+                .build();
+            row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+            let address = f.address.clone();
+            let c = self.handler(move |ui| ui.connect_to(Some(address.clone())));
+            row.connect_activated(move |_| c());
+            self.pick_list.append(&row);
+        }
+        self.stack.set_visible_child_name("pick");
     }
 
     fn toast(&self, msg: &str) {
         self.toasts.add_toast(adw::Toast::builder().title(glib::markup_escape_text(msg)).timeout(5).build());
     }
 
-    fn connect_signals(self: &Rc<Self>, connect_btn: &gtk::Button, cancel_btn: &gtk::Button) {
+    fn connect_signals(self: &Rc<Self>, connect_btn: &gtk::Button, cancel_btn: &gtk::Button, rescan_btn: &gtk::Button) {
         let c = self.handler(|ui| ui.connect());
         connect_btn.connect_clicked(move |_| c());
+        // Scan again even when an address was given: the list came from a scan.
+        let c = self.handler(|ui| ui.connect_to(None));
+        rescan_btn.connect_clicked(move |_| c());
         let c = self.handler(|ui| ui.send(Cmd::Disconnect));
         cancel_btn.connect_clicked(move |_| c());
         let c = self.handler(|ui| ui.send(Cmd::Disconnect));
@@ -740,6 +786,7 @@ impl Ui {
                     app.quit();
                 }
             }
+            Event::Choose(found) => self.show_choice(&found),
             Event::Status(s) => self.show_status(s),
             Event::Led(l) => self.show_led(&l),
             Event::Curve(levels) => self.quiet(|| {
