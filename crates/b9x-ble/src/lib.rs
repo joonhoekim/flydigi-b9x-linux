@@ -52,6 +52,9 @@ mod unsupported {
 
 pub const NAME_HINT: &str = "B9X";
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a written mode or quick switch overrides status pushes that have not
+/// caught up yet.
+pub const WRITE_HINT_TTL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -130,6 +133,29 @@ pub struct Device {
     status: watch::Receiver<Option<Status>>,
     state: watch::Receiver<LinkState>,
     version: Arc<StdMutex<Option<String>>>,
+    written: StdMutex<Written>,
+}
+
+/// Mode and quick switch we wrote last. Status pushes lag behind writes by a second
+/// or more, so decisions made right after a write go by these instead.
+#[derive(Default)]
+struct Written {
+    mode: Option<(u8, Instant)>,
+    quick_switch: Option<(u8, Instant)>,
+}
+
+fn hint(slot: &mut Option<(u8, Instant)>, reported: u8) -> u8 {
+    match *slot {
+        Some((v, _)) if v == reported => {
+            *slot = None;
+            v
+        }
+        Some((v, at)) if at.elapsed() < WRITE_HINT_TTL => v,
+        _ => {
+            *slot = None;
+            reported
+        }
+    }
 }
 
 impl Device {
@@ -148,6 +174,7 @@ impl Device {
             status: status_rx,
             state: state_rx,
             version,
+            written: StdMutex::default(),
         };
         // The device pushes its firmware version as ASCII right after subscribing.
         dev.request(&p::HANDSHAKE, |f| f.starts_with(&p::HANDSHAKE[..2])).await?;
@@ -187,7 +214,14 @@ impl Device {
         let (tx, rx) = oneshot::channel();
         let gone = || Error::Disconnected("link closed".into());
         self.requests.send(LinkRequest::Write(frame, tx)).await.map_err(|_| gone())?;
-        rx.await.map_err(|_| gone())?
+        rx.await.map_err(|_| gone())??;
+        let mut w = self.written.lock().unwrap();
+        match bytes {
+            [0x20, mode, ..] => w.mode = Some((*mode, Instant::now())),
+            [0x21, mode] => w.quick_switch = Some((*mode, Instant::now())),
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn expect(
@@ -227,6 +261,16 @@ impl Device {
                 return Ok(s);
             }
         }
+    }
+
+    /// Next status push, with the mode and quick switch we wrote in the last few
+    /// seconds in place of values the device has not reported yet.
+    pub async fn status_now(&self) -> Result<Status> {
+        let mut s = self.status().await?;
+        let mut w = self.written.lock().unwrap();
+        s.mode = hint(&mut w.mode, s.mode);
+        s.quick_switch = hint(&mut w.quick_switch, s.quick_switch);
+        Ok(s)
     }
 
     pub async fn curve(&self) -> Result<Vec<u8>> {

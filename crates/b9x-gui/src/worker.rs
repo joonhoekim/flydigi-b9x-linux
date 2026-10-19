@@ -50,9 +50,58 @@ pub enum Event {
     Quit,
 }
 
+/// What ended a connection attempt.
+enum Attempt {
+    Done(b9x_ble::Result<Arc<Device>>),
+    Cancelled(Option<oneshot::Sender<()>>),
+}
+
 pub async fn run(cmds: Receiver<Cmd>, events: Sender<Event>) {
     let mut dev: Option<Arc<Device>> = None;
     while let Ok(cmd) = cmds.recv().await {
+        if let Cmd::Connect { address, fake } = cmd {
+            if let Some(d) = dev.take() {
+                d.disconnect().await;
+            }
+            // Scanning and connecting can take half a minute; Disconnect and Quit
+            // must not wait behind it.
+            let attempt = {
+                let mut connecting = std::pin::pin!(connect(address.clone(), fake, &events));
+                loop {
+                    tokio::select! {
+                        r = &mut connecting => break Attempt::Done(r),
+                        c = cmds.recv() => match c {
+                            Ok(Cmd::Quit(done)) => break Attempt::Cancelled(Some(done)),
+                            Ok(Cmd::Disconnect) | Err(_) => break Attempt::Cancelled(None),
+                            // The controls are hidden while connecting.
+                            Ok(_) => {}
+                        },
+                    }
+                }
+            };
+            match attempt {
+                Attempt::Done(Ok(d)) => {
+                    tokio::spawn(forward(d.clone(), events.clone()));
+                    dev = Some(d);
+                }
+                Attempt::Done(Err(e)) => {
+                    let _ = events.send(Event::Disconnected(None)).await;
+                    let _ = events.send(Event::Error(e.to_string())).await;
+                }
+                Attempt::Cancelled(quit) => {
+                    // BlueZ may have finished the connect we just dropped.
+                    if !fake {
+                        let _ = b9x_ble::disconnect(address.as_deref()).await;
+                    }
+                    let _ = events.send(Event::Disconnected(None)).await;
+                    if let Some(done) = quit {
+                        let _ = done.send(());
+                        return;
+                    }
+                }
+            }
+            continue;
+        }
         if let Cmd::Quit(done) = cmd {
             if let Some(d) = dev.take() {
                 d.disconnect().await;
@@ -75,21 +124,6 @@ async fn handle(dev: &mut Option<Arc<Device>>, cmd: Cmd, events: &Sender<Event>)
         let _ = events.send(e).await;
     };
     match cmd {
-        Cmd::Connect { address, fake } => {
-            if let Some(d) = dev.take() {
-                d.disconnect().await;
-            }
-            let d = Arc::new(open(address, fake, events).await.inspect_err(|_| {
-                let _ = events.try_send(Event::Disconnected(None));
-            })?);
-            tokio::spawn(forward(d.clone(), events.clone()));
-            let mac = d.mac().await?;
-            send(Event::Connected { address: d.address().to_string(), version: d.version(), mac }).await;
-            send(Event::Led(d.led(0).await?)).await;
-            send(Event::Curve(d.curve().await?)).await;
-            send(Event::Shutdown(d.shutdown().await?)).await;
-            *dev = Some(d);
-        }
         Cmd::Disconnect => {
             if let Some(d) = dev.take() {
                 d.disconnect().await;
@@ -122,9 +156,24 @@ async fn handle(dev: &mut Option<Arc<Device>>, cmd: Cmd, events: &Sender<Event>)
             let led = connected(dev)?.led(0).await?;
             send(Event::Led(led)).await;
         }
-        Cmd::Quit(_) => unreachable!(),
+        Cmd::Connect { .. } | Cmd::Quit(_) => unreachable!(),
     }
     Ok(())
+}
+
+/// Open the device and read what the window shows. Dropping this future before it
+/// finishes drops the link, which closes it.
+async fn connect(address: Option<String>, fake: bool, events: &Sender<Event>) -> b9x_ble::Result<Arc<Device>> {
+    let d = Arc::new(open(address, fake, events).await?);
+    let mac = d.mac().await?;
+    let send = |e: Event| async move {
+        let _ = events.send(e).await;
+    };
+    send(Event::Connected { address: d.address().to_string(), version: d.version(), mac }).await;
+    send(Event::Led(d.led(0).await?)).await;
+    send(Event::Curve(d.curve().await?)).await;
+    send(Event::Shutdown(d.shutdown().await?)).await;
+    Ok(d)
 }
 
 async fn open(address: Option<String>, fake: bool, events: &Sender<Event>) -> b9x_ble::Result<Device> {
@@ -190,5 +239,58 @@ pub async fn quit_on_signal(events: Sender<Event>) {
             }
             let _ = events.send(Event::Quit).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::timeout;
+
+    fn spawn() -> (Sender<Cmd>, Receiver<Event>, tokio::task::JoinHandle<()>) {
+        let (cmd_tx, cmd_rx) = async_channel::unbounded();
+        let (ev_tx, ev_rx) = async_channel::unbounded();
+        (cmd_tx, ev_rx, tokio::spawn(run(cmd_rx, ev_tx)))
+    }
+
+    async fn next_matching(events: &Receiver<Event>, f: impl Fn(&Event) -> bool) -> Event {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let e = events.recv().await.unwrap();
+                if f(&e) {
+                    return e;
+                }
+            }
+        })
+        .await
+        .expect("event did not arrive")
+    }
+
+    #[tokio::test]
+    async fn quit_does_not_wait_behind_connect() {
+        let (tx, _events, worker) = spawn();
+        tx.send(Cmd::Connect { address: None, fake: true }).await.unwrap();
+        let (done, done_rx) = oneshot::channel();
+        tx.send(Cmd::Quit(done)).await.unwrap();
+        timeout(Duration::from_secs(2), done_rx).await.expect("quit timed out").unwrap();
+        timeout(Duration::from_secs(2), worker).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_connect_and_worker_stays_usable() {
+        let (tx, events, _worker) = spawn();
+        tx.send(Cmd::Connect { address: None, fake: true }).await.unwrap();
+        tx.send(Cmd::Disconnect).await.unwrap();
+        next_matching(&events, |e| matches!(e, Event::Disconnected(None))).await;
+
+        tx.send(Cmd::Connect { address: None, fake: true }).await.unwrap();
+        next_matching(&events, |e| matches!(e, Event::Shutdown(_))).await;
+        tx.send(Cmd::Mode(Mode::Fixed, Some(Preset::Max))).await.unwrap();
+        // Fixed keeps its own effect, Cutover on the simulated device.
+        let led = next_matching(&events, |e| matches!(e, Event::Led(_))).await;
+        assert!(matches!(led, Event::Led(l) if l.effect == 0x04));
+        // The curve is refused outside Custom instead of switching back to it.
+        tx.send(Cmd::Curve(vec![5; 9])).await.unwrap();
+        next_matching(&events, |e| matches!(e, Event::Error(_))).await;
     }
 }

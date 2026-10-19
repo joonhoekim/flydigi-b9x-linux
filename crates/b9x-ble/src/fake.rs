@@ -3,7 +3,7 @@
 //! It answers the same queries as firmware 0.3.0 and applies writes the way the
 //! captures show. It only ever receives frames that passed the whitelist.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use b9x_proto::{self as p, LedSettings, Mode};
@@ -222,19 +222,49 @@ fn pad(mut f: Vec<u8>) -> Vec<u8> {
     f
 }
 
+/// How the simulated device behaves.
+#[derive(Debug, Clone)]
+pub struct Options {
+    /// Time between status pushes.
+    pub period: Duration,
+    /// Status pushes show the state from this many pushes ago, like the real device
+    /// that keeps reporting old values for a moment after a write.
+    pub status_lag: usize,
+    /// Stored scheduled shutdown (repeat, enable, minutes), e.g. a value over 255
+    /// minutes set by the phone app.
+    pub shutdown: (bool, bool, u16),
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { period: Duration::from_secs(1), status_lag: 0, shutdown: (false, false, 62) }
+    }
+}
+
 /// A link to a new simulated device. Status pushes come every `period`.
 pub fn connect(period: Duration) -> Link {
+    connect_with(Options { period, ..Options::default() })
+}
+
+pub fn connect_with(opts: Options) -> Link {
     let (req_tx, mut req_rx) = mpsc::channel::<LinkRequest>(8);
     let (ev_tx, ev_rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
         let mut state = State::new();
+        state.shutdown = opts.shutdown;
+        state.shutdown_left = if opts.shutdown.1 { opts.shutdown.2 } else { 0 };
+        let mut history: VecDeque<Vec<u8>> = VecDeque::new();
         let _ = ev_tx.send(LinkEvent::Notify(pad(b"0.3.0\0".to_vec())));
-        let mut ticker = interval(period);
+        let mut ticker = interval(opts.period);
         ticker.tick().await;
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    let _ = ev_tx.send(LinkEvent::Notify(state.tick()));
+                    history.push_back(state.tick());
+                    while history.len() > opts.status_lag + 1 {
+                        history.pop_front();
+                    }
+                    let _ = ev_tx.send(LinkEvent::Notify(history[0].clone()));
                 }
                 r = req_rx.recv() => match r {
                     Some(LinkRequest::Write(frame, done)) => {

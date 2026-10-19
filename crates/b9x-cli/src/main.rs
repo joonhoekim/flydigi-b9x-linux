@@ -173,9 +173,10 @@ fn minutes_arg(text: &str) -> Result<u16, String> {
         None => (0, text),
     };
     let mins = if rest.is_empty() { 0 } else { num(rest.strip_suffix('m').unwrap_or(rest)).ok_or_else(bad)? };
-    let total = hours * 60 + mins;
+    let range = || format!("1-{} minutes", p::SHUTDOWN_MAX_MIN);
+    let total = hours.checked_mul(60).and_then(|h| h.checked_add(mins)).ok_or_else(range)?;
     if !(1..=p::SHUTDOWN_MAX_MIN as u32).contains(&total) {
-        return Err(format!("1-{} minutes", p::SHUTDOWN_MAX_MIN));
+        return Err(range());
     }
     Ok(total as u16)
 }
@@ -362,17 +363,23 @@ async fn run(cli: &Cli, dev: &Device) -> Result<(), CliError> {
     Ok(())
 }
 
-async fn open(cli: &Cli) -> Result<Device> {
+async fn find_address(cli: &Cli) -> Result<Option<String>> {
     if cli.fake {
-        return Device::open(fake::connect(Duration::from_secs(1)), cli.debug).await;
+        return Ok(None);
     }
-    let timeout = Duration::from_secs_f64(cli.scan_timeout);
-    let address = match &cli.address {
-        Some(a) => a.clone(),
-        None => b9x_ble::find(timeout).await?,
+    match &cli.address {
+        Some(a) => Ok(Some(a.clone())),
+        None => Ok(Some(b9x_ble::find(Duration::from_secs_f64(cli.scan_timeout)).await?)),
+    }
+}
+
+async fn open(cli: &Cli, address: Option<&str>) -> Result<Device> {
+    let Some(address) = address else {
+        return Device::open(fake::connect(Duration::from_secs(1)), cli.debug).await;
     };
     let mode = if cli.write_cmd { WriteMode::Command } else { WriteMode::Request };
-    Device::open(b9x_ble::connect(&address, mode, timeout).await?, cli.debug).await
+    let timeout = Duration::from_secs_f64(cli.scan_timeout);
+    Device::open(b9x_ble::connect(address, mode, timeout).await?, cli.debug).await
 }
 
 /// Resolves on Ctrl-C, SIGTERM or SIGHUP so the connection is closed on the way out.
@@ -396,14 +403,17 @@ async fn interrupted() {
 
 async fn main_async(cli: Cli) -> Result<(), CliError> {
     let timeout = Duration::from_secs_f64(cli.scan_timeout);
-    match cli.command {
-        Command::Scan => {
+    match (&cli.command, cli.fake) {
+        (Command::Scan, true) => return out(line(format_args!("{}  {:<16} rssi 0", fake::ADDRESS, "fake B9X"))),
+        (Command::Scan, false) => {
             for d in b9x_ble::scan(timeout).await? {
                 out(line(format_args!("{}  {:<16} rssi {}", d.address, d.name, d.rssi.unwrap_or(0))))?;
             }
             return Ok(());
         }
-        Command::Disconnect => {
+        // The simulated device has no BlueZ link to drop.
+        (Command::Disconnect, true) => return Ok(()),
+        (Command::Disconnect, false) => {
             for addr in b9x_ble::disconnect(cli.address.as_deref()).await? {
                 out(line(format_args!("disconnected {addr}")))?;
             }
@@ -411,10 +421,33 @@ async fn main_async(cli: Cli) -> Result<(), CliError> {
         }
         _ => {}
     }
-    let dev = open(&cli).await?;
+    // Scanning holds no link, so an interrupt there needs no cleanup.
+    let address = tokio::select! {
+        a = find_address(&cli) => a?,
+        _ = interrupted() => return Ok(()),
+    };
+    let dev = tokio::select! {
+        d = open(&cli, address.as_deref()) => d?,
+        _ = interrupted() => {
+            // The connect may have got through in BlueZ before it was dropped here.
+            if let Some(a) = &address {
+                let _ = b9x_ble::disconnect(Some(a)).await;
+            }
+            return Ok(());
+        }
+    };
+    let mut work = std::pin::pin!(run(&cli, &dev));
     let result = tokio::select! {
-        r = run(&cli, &dev) => r,
-        _ = interrupted() => Ok(()),
+        r = &mut work => r,
+        _ = interrupted() => match cli.command {
+            Command::Status { .. } => Ok(()),
+            // Let a change of several frames finish so the device is not left half
+            // set. Its replies time out within seconds; a second signal stops at once.
+            _ => tokio::select! {
+                r = &mut work => r,
+                _ = interrupted() => Ok(()),
+            },
+        },
     };
     dev.disconnect().await;
     result
@@ -422,7 +455,9 @@ async fn main_async(cli: Cli) -> Result<(), CliError> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    // An empty $B9X_ADDRESS means scan, as before.
+    cli.address = cli.address.filter(|a| !a.is_empty());
     match main_async(cli).await {
         Ok(()) | Err(CliError::Closed) => ExitCode::SUCCESS,
         Err(CliError::Device(e)) => {
@@ -442,7 +477,7 @@ mod tests {
         for (text, want) in [("90", 90), ("90m", 90), ("1h", 60), ("1h30", 90), ("1h30m", 90), ("4h15m", 255)] {
             assert_eq!(minutes_arg(text), Ok(want), "{text}");
         }
-        for text in ["", "m", "h", "1hm", "0", "4h16m", "1h-3", "x"] {
+        for text in ["", "m", "h", "1hm", "0", "4h16m", "1h-3", "x", "71582789h", "4294967295m", "99999999999h"] {
             assert!(minutes_arg(text).is_err(), "{text}");
         }
     }

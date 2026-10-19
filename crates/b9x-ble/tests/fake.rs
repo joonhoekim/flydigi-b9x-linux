@@ -81,3 +81,67 @@ async fn disconnect_fails_pending_work() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     assert!(matches!(dev.mac().await, Err(Error::Disconnected(_))));
 }
+
+async fn open_with(opts: fake::Options) -> Device {
+    Device::open(fake::connect_with(opts), false).await.unwrap()
+}
+
+/// Status pushes three behind, like the real device right after a write.
+fn lagging() -> fake::Options {
+    fake::Options { period: Duration::from_millis(20), status_lag: 3, ..fake::Options::default() }
+}
+
+async fn settled(dev: &Device) -> b9x_proto::Status {
+    for _ in 0..5 {
+        dev.status().await.unwrap();
+    }
+    dev.status().await.unwrap()
+}
+
+#[tokio::test]
+async fn quick_switch_follows_writes_not_stale_status() {
+    let dev = open_with(lagging()).await;
+    control::set_mode(&dev, Mode::Fixed, Some(Preset::Strong), None).await.unwrap();
+    // Back at once, before any push shows Fixed.
+    control::set_mode(&dev, Mode::Smart, Some(Preset::Silent), None).await.unwrap();
+    let s = settled(&dev).await;
+    assert_eq!((s.mode, s.quick_switch), (Mode::Smart.code(), Mode::Fixed.code()));
+
+    // The quick switch check also goes by what was written.
+    control::set_mode(&dev, Mode::Custom, None, None).await.unwrap();
+    let e = control::set_quick_switch(&dev, Mode::Custom).await.unwrap_err();
+    assert!(matches!(e, Error::Invalid(_)), "{e}");
+}
+
+#[tokio::test]
+async fn curve_only_in_custom_mode() {
+    let dev = open_with(lagging()).await;
+    let levels = [1, 2, 3, 4, 5, 6, 7, 8, 8];
+    // A curve frame switches to Custom, so it must not go out in another mode.
+    let e = control::set_curve(&dev, &levels).await.unwrap_err();
+    assert!(matches!(e, Error::Invalid(_)), "{e}");
+    assert_eq!(settled(&dev).await.mode, Mode::Smart.code());
+
+    control::set_mode(&dev, Mode::Custom, None, None).await.unwrap();
+    control::set_curve(&dev, &levels).await.unwrap();
+    assert_eq!(dev.curve().await.unwrap(), levels);
+    control::set_mode(&dev, Mode::Fixed, None, None).await.unwrap();
+    assert!(control::set_curve(&dev, &levels).await.is_err());
+}
+
+#[tokio::test]
+async fn shutdown_off_with_long_stored_duration() {
+    let opts = fake::Options { period: Duration::from_millis(20), shutdown: (false, true, 300), ..Default::default() };
+    let dev = open_with(opts).await;
+    assert_eq!(dev.shutdown().await.unwrap().minutes, 300);
+    let sd = control::set_shutdown(&dev, None).await.unwrap();
+    assert_eq!((sd.enable, sd.minutes), (false, p::SHUTDOWN_MAX_MIN));
+}
+
+#[tokio::test]
+async fn led_speed_out_of_range_is_an_error() {
+    let dev = open().await;
+    let change = LedChange { speed: Some(3), ..Default::default() };
+    let e = control::set_led(&dev, p::effect_by_name("breathing").unwrap(), &change).await.unwrap_err();
+    assert!(matches!(e, Error::Invalid(_)), "{e}");
+}

@@ -26,7 +26,8 @@ struct State {
     led: Option<LedSettings>,
     shutdown: Option<ShutdownInfo>,
     smart_preset: Option<Preset>,
-    /// Effect we already asked the LED settings for.
+    /// Effect we last asked the LED settings for. Not cleared by the reply, so a
+    /// device whose `51 00` disagrees with its status is asked once, not every second.
     led_requested: Option<u8>,
 }
 
@@ -172,8 +173,11 @@ impl Ui {
         let busy =
             gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).valign(gtk::Align::Center).build();
         let spinner = adw::Spinner::builder().width_request(48).height_request(48).build();
+        let cancel_btn =
+            gtk::Button::builder().label("Cancel").halign(gtk::Align::Center).css_classes(["pill"]).build();
         busy.append(&spinner);
         busy.append(&busy_label);
+        busy.append(&cancel_btn);
 
         // --- status ---
         let temp_label = gtk::Label::builder().css_classes(["title-1", "numeric"]).label("–").build();
@@ -401,7 +405,7 @@ impl Ui {
             firmware_row,
             mac_row,
         });
-        ui.connect_signals(&connect_btn);
+        ui.connect_signals(&connect_btn, &cancel_btn);
         ui
     }
 
@@ -440,10 +444,8 @@ impl Ui {
 
     /// Run `f` once `key` has not been touched for [`DEBOUNCE`].
     fn debounce(self: &Rc<Self>, key: &'static str, f: impl FnOnce(&Ui) + 'static) {
+        self.cancel(key);
         let mut timers = self.timers.borrow_mut();
-        if let Some(i) = timers.iter().position(|(k, _)| *k == key) {
-            timers.remove(i).1.remove();
-        }
         let ui = Rc::downgrade(self);
         let id = glib::timeout_add_local_once(DEBOUNCE, move || {
             if let Some(ui) = ui.upgrade() {
@@ -452,6 +454,18 @@ impl Ui {
             }
         });
         timers.push((key, id));
+    }
+
+    /// Drop a debounced change that has not gone out yet.
+    fn cancel(&self, key: &str) {
+        let mut timers = self.timers.borrow_mut();
+        if let Some(i) = timers.iter().position(|(k, _)| *k == key) {
+            timers.remove(i).1.remove();
+        }
+    }
+
+    fn pending(&self, key: &str) -> bool {
+        self.timers.borrow().iter().any(|(k, _)| *k == key)
     }
 
     pub fn connect(&self) {
@@ -465,9 +479,11 @@ impl Ui {
         self.toasts.add_toast(adw::Toast::builder().title(glib::markup_escape_text(msg)).timeout(5).build());
     }
 
-    fn connect_signals(self: &Rc<Self>, connect_btn: &gtk::Button) {
+    fn connect_signals(self: &Rc<Self>, connect_btn: &gtk::Button, cancel_btn: &gtk::Button) {
         let c = self.handler(|ui| ui.connect());
         connect_btn.connect_clicked(move |_| c());
+        let c = self.handler(|ui| ui.send(Cmd::Disconnect));
+        cancel_btn.connect_clicked(move |_| c());
         let c = self.handler(|ui| ui.send(Cmd::Disconnect));
         self.disconnect_btn.connect_clicked(move |_| c());
 
@@ -480,6 +496,8 @@ impl Ui {
                 Mode::Smart => Some(ui.state.borrow().smart_preset.unwrap_or(Preset::Silent)),
                 _ => None,
             };
+            // A curve frame would switch straight back to Custom.
+            ui.cancel("curve");
             ui.show_mode(mode);
             ui.send(Cmd::Mode(mode, preset));
         });
@@ -513,6 +531,9 @@ impl Ui {
                     return;
                 }
                 ui.debounce("curve", |ui| {
+                    if ui.mode_group.active_name().as_deref() != Some(Mode::Custom.name()) {
+                        return;
+                    }
                     let levels = ui.curve_scales.iter().map(|s| s.value().round() as u8).collect();
                     ui.send(Cmd::Curve(levels));
                 });
@@ -557,6 +578,8 @@ impl Ui {
                 return;
             }
             let Some(e) = p::EFFECTS.get(ui.effect_row.selected() as usize) else { return };
+            // A pending brightness belongs to the old effect; sending it would select that again.
+            ui.cancel("brightness");
             ui.state.borrow_mut().led_requested = Some(e.code);
             ui.send(Cmd::Led(e.code, LedChange::default()));
         });
@@ -614,10 +637,11 @@ impl Ui {
         self.repeat_row.connect_active_notify(move |_| c());
     }
 
+    /// Change settings of the effect shown in the window, which is the one the user
+    /// picked last even before the device has answered.
     fn send_led(&self, change: LedChange) {
-        let code = self.state.borrow().led.as_ref().map(|l| l.effect);
-        if let Some(code) = code {
-            self.send(Cmd::Led(code, change));
+        if let Some(e) = p::EFFECTS.get(self.effect_row.selected() as usize) {
+            self.send(Cmd::Led(e.code, change));
         }
     }
 
@@ -627,16 +651,20 @@ impl Ui {
         self.send(Cmd::Shutdown(schedule));
     }
 
-    fn current_colors(&self) -> Vec<p::Rgb> {
-        let mut colors = Vec::new();
+    fn color_buttons(&self) -> Vec<gtk::ColorDialogButton> {
+        let mut buttons = Vec::new();
         let mut child = self.colors_box.first_child();
         while let Some(c) = child {
             if let Some(b) = c.downcast_ref::<gtk::ColorDialogButton>() {
-                colors.push(rgb(&b.rgba()));
+                buttons.push(b.clone());
             }
             child = c.next_sibling();
         }
-        colors
+        buttons
+    }
+
+    fn current_colors(&self) -> Vec<p::Rgb> {
+        self.color_buttons().iter().map(|b| rgb(&b.rgba())).collect()
     }
 
     fn change_colors(&self, delta: i32) {
@@ -783,11 +811,7 @@ impl Ui {
     }
 
     fn show_led(self: &Rc<Self>, l: &LedSettings) {
-        {
-            let mut st = self.state.borrow_mut();
-            st.led = Some(l.clone());
-            st.led_requested = None;
-        }
+        self.state.borrow_mut().led = Some(l.clone());
         let Some(e) = p::effect_by_code(l.effect) else { return };
         self.quiet(|| {
             if let Some(i) = p::EFFECTS.iter().position(|x| x.code == e.code) {
@@ -798,19 +822,30 @@ impl Ui {
                 self.speed_row.set_selected(p::SPEED_NAMES.iter().position(|n| *n == name).unwrap_or(1) as u32);
             }
             self.brightness_row.set_visible(e.writable);
-            if l.brightness >= p::BRIGHTNESS_MIN {
+            // Leave the slider alone while a drag is still waiting to go out.
+            if l.brightness >= p::BRIGHTNESS_MIN && !self.pending("brightness") {
                 self.brightness.set_value(l.brightness as f64);
             }
             self.rhythm_row.set_visible(e.name == "rhythm");
             self.rhythm_row.set_active(l.color_mode == p::RHYTHM_COLORFUL);
 
             self.colors_row.set_visible(e.colors.is_some());
-            while let Some(c) = self.colors_box.first_child() {
-                self.colors_box.remove(&c);
-            }
             if let Some((lo, hi)) = e.colors {
-                for c in &l.colors {
-                    self.colors_box.append(&self.color_button(c));
+                let buttons = self.color_buttons();
+                if buttons.len() == l.colors.len() {
+                    // Update in place: rebuilding would close an open colour dialog.
+                    for (b, c) in buttons.iter().zip(&l.colors) {
+                        if rgb(&b.rgba()) != *c {
+                            b.set_rgba(&rgba(c));
+                        }
+                    }
+                } else {
+                    while let Some(c) = self.colors_box.first_child() {
+                        self.colors_box.remove(&c);
+                    }
+                    for c in &l.colors {
+                        self.colors_box.append(&self.color_button(c));
+                    }
                 }
                 self.add_color.set_visible(hi > 1);
                 self.remove_color.set_visible(hi > 1);

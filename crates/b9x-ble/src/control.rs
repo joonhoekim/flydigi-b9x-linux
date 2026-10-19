@@ -22,7 +22,7 @@ pub async fn set_mode(dev: &Device, mode: Mode, preset: Option<Preset>, curve: O
     if curve.is_some() && mode != Mode::Custom {
         return invalid("--curve is for custom mode");
     }
-    let before = dev.status().await?;
+    let before = dev.status_now().await?;
     let frame = match (curve, preset) {
         (Some(c), _) => p::custom_curve(c)?,
         (None, Some(pr)) => p::mode_preset(mode, pr)?,
@@ -39,12 +39,17 @@ pub async fn set_mode(dev: &Device, mode: Mode, preset: Option<Preset>, curve: O
 }
 
 /// Write a custom curve while already in Custom mode, as the app does on every knob move.
+/// The curve frame also switches to Custom, so it is refused in the other modes.
 pub async fn set_curve(dev: &Device, levels: &[u8]) -> Result<()> {
-    dev.write(&p::custom_curve(levels)?).await
+    let frame = p::custom_curve(levels)?;
+    if dev.status_now().await?.mode != Mode::Custom.code() {
+        return invalid("the curve can only be changed in custom mode");
+    }
+    dev.write(&frame).await
 }
 
 pub async fn set_quick_switch(dev: &Device, mode: Mode) -> Result<()> {
-    let s = dev.status().await?;
+    let s = dev.status_now().await?;
     if mode.code() == s.mode {
         return invalid(format!("quick switch cannot be the current mode ({})", mode.name()));
     }
@@ -75,9 +80,11 @@ pub async fn set_shutdown(dev: &Device, schedule: Option<(u16, bool)>) -> Result
         None => {
             // Keep the last duration like the app. The only off frame captured has
             // repeat set, so send that one regardless of the current flag.
+            // The minutes go out as one byte (see SHUTDOWN_MAX_MIN); a longer duration
+            // set by the phone app is stored as 255 when switching off.
             let cur = dev.shutdown().await?;
             if cur.enable {
-                dev.write(&p::shutdown(true, false, cur.minutes)?).await?;
+                dev.write(&p::shutdown(true, false, cur.minutes.min(p::SHUTDOWN_MAX_MIN))?).await?;
             }
         }
     }
@@ -105,8 +112,12 @@ pub async fn set_led(dev: &Device, effect: &p::Effect, change: &LedChange) -> Re
     if !change.is_empty() && !effect.writable {
         return invalid(format!("{} has no settings; select it without options", effect.name));
     }
-    if change.speed.is_some() && effect.speeds.is_none() {
-        return invalid(format!("{} has no speed", effect.name));
+    if let Some(i) = change.speed {
+        match effect.speeds {
+            None => return invalid(format!("{} has no speed", effect.name)),
+            Some(speeds) if i >= speeds.len() => return invalid(format!("speed must be 0-{}", speeds.len() - 1)),
+            Some(_) => {}
+        }
     }
     if let Some(colors) = &change.colors {
         let Some((lo, hi)) = effect.colors else {

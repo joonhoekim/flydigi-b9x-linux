@@ -160,17 +160,11 @@ async fn connect_device(adapter: &Adapter, addr: Address, scan_timeout: Duration
         sleep(Duration::from_millis(500)).await;
         result = flatten(timeout(CONNECT_TIMEOUT, dev.connect()).await);
     }
-    if !dev.is_connected().await? {
+    if !dev.is_connected().await.unwrap_or(false) {
+        // Also cancels a connect that timed out on our side but is still pending in BlueZ.
+        let _ = dev.disconnect().await;
         let why = result.err().unwrap_or_default();
         return Err(Error::Ble(format!("connect {addr}: {why}")));
-    }
-    let resolve_deadline = Instant::now() + RESOLVE_TIMEOUT;
-    while !dev.is_services_resolved().await? {
-        if Instant::now() > resolve_deadline {
-            let _ = dev.disconnect().await;
-            return Err(Error::Ble("GATT services not resolved".into()));
-        }
-        sleep(Duration::from_millis(100)).await;
     }
     Ok(dev)
 }
@@ -180,20 +174,28 @@ pub async fn connect(address: &str, mode: WriteMode, scan_timeout: Duration) -> 
     let addr: Address = address.parse().map_err(|_| Error::Invalid(format!("bad address {address}")))?;
     let adapter = adapter().await?;
     let dev = connect_device(&adapter, addr, scan_timeout).await?;
+    // Anything failing from here on must not leave BlueZ holding the link.
     let setup = async {
+        let resolve_deadline = Instant::now() + RESOLVE_TIMEOUT;
+        while !dev.is_services_resolved().await? {
+            if Instant::now() > resolve_deadline {
+                return Err(Error::Ble("GATT services not resolved".into()));
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
         let write = characteristic(&dev, p::WRITE_UUID).await?;
         let notify = characteristic(&dev, p::NOTIFY_UUID).await?;
         let notes = notify.notify().await?;
-        Ok::<_, Error>((write, notes))
+        let dev_events = dev.events().await?;
+        Ok::<_, Error>((write, notes, dev_events))
     };
-    let (write, notes) = match setup.await {
+    let (write, notes, dev_events) = match setup.await {
         Ok(v) => v,
         Err(e) => {
             let _ = dev.disconnect().await;
             return Err(e);
         }
     };
-    let dev_events = dev.events().await?;
 
     let (req_tx, mut req_rx) = mpsc::channel::<LinkRequest>(8);
     let (ev_tx, ev_rx) = mpsc::unbounded_channel();
@@ -242,18 +244,27 @@ pub async fn connect(address: &str, mode: WriteMode, scan_timeout: Duration) -> 
 
 /// Drop BlueZ connections to B9X coolers, or only to `address`. BlueZ keeps a link up
 /// after the process that opened it dies. Returns the addresses disconnected.
+///
+/// With an address, Disconnect goes out even when BlueZ does not report a connection
+/// yet: it also cancels a connect still pending from a process that gave up on it.
 pub async fn disconnect(address: Option<&str>) -> Result<Vec<String>> {
     let adapter = adapter().await?;
     let mut done = Vec::new();
     for addr in adapter.device_addresses().await? {
-        let wanted = match address {
-            Some(a) => a.eq_ignore_ascii_case(&addr.to_string()),
-            None => is_b9x(&adapter, addr).await,
-        };
         let dev = adapter.device(addr)?;
-        if wanted && dev.is_connected().await? {
-            dev.disconnect().await?;
-            done.push(addr.to_string());
+        let connected = dev.is_connected().await.unwrap_or(false);
+        match address {
+            Some(a) if a.eq_ignore_ascii_case(&addr.to_string()) => {
+                // Fails with "Not Connected" when there was nothing to drop.
+                if dev.disconnect().await.is_ok() && connected {
+                    done.push(addr.to_string());
+                }
+            }
+            None if connected && is_b9x(&adapter, addr).await => {
+                dev.disconnect().await?;
+                done.push(addr.to_string());
+            }
+            _ => {}
         }
     }
     Ok(done)
