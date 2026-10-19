@@ -13,7 +13,7 @@
 | `testdata/app_writes.txt` | Every distinct write the official app made. Shared by the Rust and Python tests |
 | `docs/protocol.md` | Protocol notes (Korean) |
 | `data/` | Desktop entry, AppStream metainfo and icon, installed by `install.sh` |
-| `tools/icons/gen.py` | Generates the dot-grid icon and its drafts (`--preview` for a comparison sheet) |
+| `tools/icons/icon.py` | Generates the app icon (`--preview` for 128/64/32 px on light and dark) |
 | `tools/` | `btsnoop_att.py` (ATT parser for btsnoop logs), `pull_snoop.sh` |
 | `b9x/`, `tests/` | Deprecated Python implementation |
 | `captures/`, `refs/` | Local only, not in git: captures and clones of related projects |

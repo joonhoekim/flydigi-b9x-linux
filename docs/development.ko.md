@@ -13,7 +13,7 @@
 | `testdata/app_writes.txt` | 공식 앱이 보낸 쓰기 전체. Rust·Python 테스트가 같이 쓴다 |
 | `docs/protocol.md` | 프로토콜 분석 기록 |
 | `data/` | 데스크톱 항목, AppStream metainfo, 아이콘. `install.sh` 가 설치한다 |
-| `tools/icons/gen.py` | 점 격자 아이콘과 시안 생성 (`--preview` 로 비교 화면) |
+| `tools/icons/icon.py` | 앱 아이콘 생성 (`--preview` 로 밝은·어두운 배경의 128/64/32 px) |
 | `tools/` | `btsnoop_att.py`(btsnoop 로그 ATT 파서), `pull_snoop.sh` |
 | `b9x/`, `tests/` | deprecated 된 Python 구현 |
 | `captures/`, `refs/` | 로컬 전용, git 에 넣지 않음: 캡처, 관련 프로젝트 클론 |

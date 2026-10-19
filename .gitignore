@@ -40,3 +40,6 @@ $RECYCLE.BIN/
 .idea/
 *.swp
 tools/icons/preview.svg
+tools/icons/preview.png
+tools/icons/compare.png
+tools/icons/icon-512.png
