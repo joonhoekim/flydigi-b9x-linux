@@ -1,0 +1,16 @@
+[project]
+name = "b9x"
+version = "0.1.0"
+description = "Control the Flydigi B9X phone cooler over BLE"
+requires-python = ">=3.9"
+dependencies = ["bleak>=0.22"]
+
+[project.scripts]
+b9x = "b9x.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["b9x"]
