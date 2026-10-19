@@ -405,6 +405,16 @@ impl Ui {
         ui
     }
 
+    /// A signal handler that holds the UI weakly, so widgets do not keep it alive.
+    fn handler(self: &Rc<Self>, f: impl Fn(&Rc<Ui>) + 'static) -> impl Fn() + 'static {
+        let weak = Rc::downgrade(self);
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                f(&ui);
+            }
+        }
+    }
+
     fn send(&self, cmd: Cmd) {
         let _ = self.tx.try_send(cmd);
     }
@@ -456,22 +466,12 @@ impl Ui {
     }
 
     fn connect_signals(self: &Rc<Self>, connect_btn: &gtk::Button) {
-        let weak = Rc::downgrade(self);
-        let with = move |f: Box<dyn Fn(&Rc<Ui>)>| {
-            let weak = weak.clone();
-            move || {
-                if let Some(ui) = weak.upgrade() {
-                    f(&ui);
-                }
-            }
-        };
-
-        let c = with(Box::new(|ui| ui.connect()));
+        let c = self.handler(|ui| ui.connect());
         connect_btn.connect_clicked(move |_| c());
-        let c = with(Box::new(|ui| ui.send(Cmd::Disconnect)));
+        let c = self.handler(|ui| ui.send(Cmd::Disconnect));
         self.disconnect_btn.connect_clicked(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if !ui.user() {
                 return;
             }
@@ -482,10 +482,10 @@ impl Ui {
             };
             ui.show_mode(mode);
             ui.send(Cmd::Mode(mode, preset));
-        }));
+        });
         self.mode_group.connect_active_name_notify(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if !ui.user() {
                 return;
             }
@@ -494,21 +494,21 @@ impl Ui {
             if let (Some(m), Some(pr)) = (mode, preset) {
                 ui.send(Cmd::Mode(m, Some(pr)));
             }
-        }));
+        });
         self.preset_group.connect_active_name_notify(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if !ui.user() {
                 return;
             }
             if let Some(m) = ui.quick_group.active_name().and_then(|n| Mode::from_name(&n)) {
                 ui.send(Cmd::QuickSwitch(m));
             }
-        }));
+        });
         self.quick_group.connect_active_name_notify(move |_| c());
 
         for scale in &self.curve_scales {
-            let c = with(Box::new(|ui| {
+            let c = self.handler(|ui| {
                 if !ui.user() {
                     return;
                 }
@@ -516,11 +516,11 @@ impl Ui {
                     let levels = ui.curve_scales.iter().map(|s| s.value().round() as u8).collect();
                     ui.send(Cmd::Curve(levels));
                 });
-            }));
+            });
             scale.connect_value_changed(move |_| c());
         }
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if !ui.user() {
                 return;
             }
@@ -542,35 +542,35 @@ impl Ui {
                     ui.send(Cmd::Overclock(true));
                 }
             });
-        }));
+        });
         self.oc_row.connect_active_notify(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if ui.user() {
                 ui.send(Cmd::Light(ui.light_row.is_active()));
             }
-        }));
+        });
         self.light_row.connect_active_notify(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if !ui.user() {
                 return;
             }
             let Some(e) = p::EFFECTS.get(ui.effect_row.selected() as usize) else { return };
             ui.state.borrow_mut().led_requested = Some(e.code);
             ui.send(Cmd::Led(e.code, LedChange::default()));
-        }));
+        });
         self.effect_row.connect_selected_notify(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if ui.user() {
                 let speed = ui.speed_row.selected() as usize;
                 ui.send_led(LedChange { speed: Some(speed), ..Default::default() });
             }
-        }));
+        });
         self.speed_row.connect_selected_notify(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if !ui.user() {
                 return;
             }
@@ -578,39 +578,39 @@ impl Ui {
                 let b = ui.brightness.value().round() as u8;
                 ui.send_led(LedChange { brightness: Some(b), ..Default::default() });
             });
-        }));
+        });
         self.brightness.connect_value_changed(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if ui.user() {
                 ui.send_led(LedChange { rhythm_colorful: Some(ui.rhythm_row.is_active()), ..Default::default() });
             }
-        }));
+        });
         self.rhythm_row.connect_active_notify(move |_| c());
 
-        let c = with(Box::new(|ui| ui.change_colors(1)));
+        let c = self.handler(|ui| ui.change_colors(1));
         self.add_color.connect_clicked(move |_| c());
-        let c = with(Box::new(|ui| ui.change_colors(-1)));
+        let c = self.handler(|ui| ui.change_colors(-1));
         self.remove_color.connect_clicked(move |_| c());
 
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if ui.user() {
                 ui.send_shutdown();
             }
-        }));
+        });
         self.shutdown_row.connect_active_notify(move |_| c());
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             ui.minutes_row.set_subtitle(&hm(ui.minutes_row.value() as u16));
             if ui.user() && ui.shutdown_row.is_active() {
                 ui.debounce("shutdown", |ui| ui.send_shutdown());
             }
-        }));
+        });
         self.minutes_row.connect_value_notify(move |_| c());
-        let c = with(Box::new(|ui| {
+        let c = self.handler(|ui| {
             if ui.user() && ui.shutdown_row.is_active() {
                 ui.send_shutdown();
             }
-        }));
+        });
         self.repeat_row.connect_active_notify(move |_| c());
     }
 
