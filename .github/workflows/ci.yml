@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    # GTK 4.12+ and libadwaita 1.7+ are needed; Ubuntu 24.04 is too old.
+    container: debian:trixie
+    steps:
+      - name: System packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential \
+            pkg-config libdbus-1-dev libgtk-4-dev libadwaita-1-dev python3
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      # The deprecated Python whitelist must keep agreeing with the Rust one.
+      - run: python3 -m unittest discover -s tests

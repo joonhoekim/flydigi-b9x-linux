@@ -34,10 +34,19 @@ BLE 백엔드와 GUI 툴킷은 운영체제마다 따로 두어 각 플랫폼에
 
 ## 설치 (Linux)
 
+[릴리스](https://github.com/joonhoekim/flydigi-b9x-linux/releases)에서 받는다(x86_64, aarch64).
+GTK 4.12 이상, libadwaita 1.7 이상이 필요하다: Debian 13, Ubuntu 25.04, Fedora 42 또는 그 이후.
+
+```sh
+tar xf b9x-0.2.0-linux-$(uname -m).tar.gz && cd b9x-0.2.0-linux-$(uname -m)
+./install.sh                   # ~/.local 에 설치. --prefix DIR, --uninstall
+```
+
+소스에서:
+
 ```sh
 sudo apt install cargo libdbus-1-dev libgtk-4-dev libadwaita-1-dev pkg-config
-cargo build --release          # target/release/b9x, target/release/b9x-gui
-cargo install --path crates/b9x-cli && cargo install --path crates/b9x-gui   # 또는 ~/.cargo/bin 에 설치
+cargo build --release && ./install.sh
 ```
 
 B9X 는 HID 서비스를 광고하지만 페어링을 거부하고, BlueZ 의 HID 플러그인은 페어링에 실패하면 연결을 끊는다.
@@ -71,8 +80,7 @@ b9x --fake status                         # 모의 기기. 하드웨어 없이 �
 ```
 
 ```sh
-b9x-gui [-a ADDRESS] [--fake]
-install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications/io.github.flydigib9x.B9X.desktop
+b9x-gui [-a ADDRESS] [--fake]           # 또는 앱 런처의 "B9X Cooler"
 ```
 
 ## 제한

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.joonhoekim.FlydigiB9X</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>B9X Cooler</name>
+  <summary>Control the Flydigi B9X phone cooler</summary>
+  <description>
+    <p>
+      Unofficial controller for the Flydigi B9X phone cooler over Bluetooth LE,
+      without the official app. Not affiliated with Flydigi.
+    </p>
+    <ul>
+      <li>Live cold plate temperature with a graph, fan speed and cooling output</li>
+      <li>Cooling mode, presets and the custom cooling curve</li>
+      <li>Quick switch, OC Experience and scheduled shutdown</li>
+      <li>Lighting, LED effects and colours</li>
+    </ul>
+    <p>
+      Only frames the official app was seen sending are ever written to the cooler.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.joonhoekim.FlydigiB9X.desktop</launchable>
+  <url type="homepage">https://github.com/joonhoekim/flydigi-b9x-linux</url>
+  <url type="bugtracker">https://github.com/joonhoekim/flydigi-b9x-linux/issues</url>
+  <developer id="io.github.joonhoekim">
+    <name>joonhoekim</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <releases>
+    <release version="0.2.0" date="2026-10-19">
+      <description>
+        <p>First release of the Rust CLI and the GTK app.</p>
+      </description>
+    </release>
+  </releases>
+</component>

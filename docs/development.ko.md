@@ -12,7 +12,8 @@
 | `crates/b9x-gui` | `b9x-gui`, GTK 4 / libadwaita. tokio worker 가 기기를 갖고, 창은 채널로 주고받는다 |
 | `testdata/app_writes.txt` | 공식 앱이 보낸 쓰기 전체. Rust·Python 테스트가 같이 쓴다 |
 | `docs/protocol.md` | 프로토콜 분석 기록 |
-| `data/` | GUI 데스크톱 파일 |
+| `data/` | 데스크톱 항목, AppStream metainfo, 아이콘. `install.sh` 가 설치한다 |
+| `tools/icons/gen.py` | 점 격자 아이콘과 시안 생성 (`--preview` 로 비교 화면) |
 | `tools/` | `btsnoop_att.py`(btsnoop 로그 ATT 파서), `pull_snoop.sh` |
 | `b9x/`, `tests/` | deprecated 된 Python 구현 |
 | `captures/`, `refs/` | 로컬 전용, git 에 넣지 않음: 캡처, 관련 프로젝트 클론 |
@@ -43,6 +44,12 @@ cargo clippy --all-targets
 - Gradient 는 8색 쓰기만 캡처했다. 2–8색을 허용하지만 8색 미만은 미검증이다.
 - 예약 종료 분은 1바이트(최대 255)로 보낸다. 더 큰 값의 바이트 순서를 확인하지 않았다.
   폰 앱이 더 길게 설정한 예약을 끌 때는 255로 저장된다.
+
+## 릴리스
+
+1. `Cargo.toml` 의 버전, `data/io.github.joonhoekim.FlydigiB9X.metainfo.xml` 의 `<releases>`, `CHANGELOG.md` 를 고친다.
+2. 커밋하고 `vX.Y.Z` 태그를 push 한다. `.github/workflows/release.yml` 이 Debian 13 에서
+   x86_64·aarch64 tarball 을 만들고, CHANGELOG 의 해당 절을 노트로 GitHub 릴리스를 올린다.
 
 ## Python (deprecated)
 

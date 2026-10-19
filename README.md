@@ -35,10 +35,19 @@ Backends and GUI toolkits are per OS, so each platform gets its own native build
 
 ## Install (Linux)
 
+From a [release](https://github.com/joonhoekim/flydigi-b9x-linux/releases) (x86_64, aarch64).
+It needs GTK 4.12+ and libadwaita 1.7+: Debian 13, Ubuntu 25.04, Fedora 42 or newer.
+
+```sh
+tar xf b9x-0.2.0-linux-$(uname -m).tar.gz && cd b9x-0.2.0-linux-$(uname -m)
+./install.sh                   # into ~/.local; --prefix DIR, --uninstall
+```
+
+From source:
+
 ```sh
 sudo apt install cargo libdbus-1-dev libgtk-4-dev libadwaita-1-dev pkg-config
-cargo build --release          # target/release/b9x and target/release/b9x-gui
-cargo install --path crates/b9x-cli && cargo install --path crates/b9x-gui   # or install into ~/.cargo/bin
+cargo build --release && ./install.sh
 ```
 
 The B9X exposes a HID service but rejects pairing, and BlueZ drops the connection
@@ -72,8 +81,7 @@ b9x --fake status                         # simulated device, no hardware needed
 ```
 
 ```sh
-b9x-gui [-a ADDRESS] [--fake]
-install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications/io.github.flydigib9x.B9X.desktop
+b9x-gui [-a ADDRESS] [--fake]           # or "B9X Cooler" in the app launcher
 ```
 
 ## Limitations

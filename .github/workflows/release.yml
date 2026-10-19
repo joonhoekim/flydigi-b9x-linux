@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    # Built against Debian 13: runs on distributions with GTK 4.12+ and libadwaita 1.7+.
+    container: debian:trixie
+    steps:
+      - name: System packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential \
+            pkg-config libdbus-1-dev libgtk-4-dev libadwaita-1-dev
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Package
+        run: |
+          name=b9x-${GITHUB_REF_NAME#v}-linux-${{ matrix.arch }}
+          mkdir -p "$name/bin"
+          cp target/release/b9x target/release/b9x-gui "$name/bin/"
+          cp -r data install.sh LICENSE README.md README.ko.md CHANGELOG.md "$name/"
+          mkdir -p "$name/docs" && cp docs/linux-bluez.md docs/linux-bluez.ko.md "$name/docs/"
+          tar czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch }}
+          path: b9x-*.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Notes: the CHANGELOG section of this version.
+          v=${GITHUB_REF_NAME#v}
+          awk -v v="$v" '/^## /{p = index($0, "## " v) == 1; next} p' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" b9x-*.tar.gz* --title "$GITHUB_REF_NAME" --notes-file notes.md

@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 
 use crate::worker::Cmd;
 
-const APP_ID: &str = "io.github.flydigib9x.B9X";
+const APP_ID: &str = "io.github.joonhoekim.FlydigiB9X";
 
 fn parse_args() -> (Option<String>, bool) {
     let mut address = std::env::var("B9X_ADDRESS").ok().filter(|a| !a.is_empty());
@@ -51,6 +51,8 @@ fn main() -> glib::ExitCode {
     let app = adw::Application::builder().application_id(APP_ID).build();
     let tx = cmd_tx.clone();
     app.connect_activate(move |app| {
+        // Installed by install.sh; without it GTK falls back to a generic icon.
+        gtk::Window::set_default_icon_name(APP_ID);
         if let Some(w) = app.active_window() {
             w.present();
             return;

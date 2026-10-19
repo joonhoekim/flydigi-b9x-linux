@@ -12,7 +12,8 @@
 | `crates/b9x-gui` | `b9x-gui`, GTK 4 / libadwaita. A tokio worker owns the device; the window talks to it over channels |
 | `testdata/app_writes.txt` | Every distinct write the official app made. Shared by the Rust and Python tests |
 | `docs/protocol.md` | Protocol notes (Korean) |
-| `data/` | Desktop file for the GUI |
+| `data/` | Desktop entry, AppStream metainfo and icon, installed by `install.sh` |
+| `tools/icons/gen.py` | Generates the dot-grid icon and its drafts (`--preview` for a comparison sheet) |
 | `tools/` | `btsnoop_att.py` (ATT parser for btsnoop logs), `pull_snoop.sh` |
 | `b9x/`, `tests/` | Deprecated Python implementation |
 | `captures/`, `refs/` | Local only, not in git: captures and clones of related projects |
@@ -46,6 +47,14 @@ cargo clippy --all-targets
 - Gradient was only captured with 8 colours; 2–8 are allowed, fewer than 8 is untested.
 - Scheduled shutdown minutes go out as one byte (255 max): the byte order of larger
   values is unconfirmed. Switching off a longer duration set by the phone app stores 255.
+
+## Releasing
+
+1. Update the version in `Cargo.toml`, the `<releases>` list in
+   `data/io.github.joonhoekim.FlydigiB9X.metainfo.xml` and `CHANGELOG.md`.
+2. Commit, tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` builds
+   x86_64 and aarch64 tarballs on Debian 13 and publishes a GitHub release with the
+   CHANGELOG section as notes.
 
 ## Python (deprecated)
 
