@@ -66,6 +66,11 @@ b9x oc on --yes
 - Gradient 는 8색 쓰기만 캡처했다. 2–8색을 허용하지만 8색 미만은 미검증이다.
 - 예약 종료는 255분까지만 받는다. 분 값의 상위 바이트 순서를 확인하지 않았다.
 
+macOS 실기기에서 `oc on` 을 뺀 모든 명령을 확인했다 (모드·커브·Quick switch·조명·예약 종료·LED 단색/다색/Rhythm).
+Linux(BlueZ)는 아직 확인하지 않았다.
+
+신호가 약하면(RSSI -70 근처) macOS 에서 link supervision timeout 으로 연결이 끊길 수 있다.
+
 테스트는 캡처한 앱 쓰기 전체를 화이트리스트에 대조한다.
 
 ```sh
