@@ -1,0 +1,18 @@
+[package]
+name = "b9x-gui"
+description = "GTK 4 / libadwaita front end for the Flydigi B9X phone cooler (Linux)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "b9x-gui"
+path = "src/main.rs"
+
+[dependencies]
+b9x-proto.workspace = true
+b9x-ble.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+async-channel = "2"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_7"] }

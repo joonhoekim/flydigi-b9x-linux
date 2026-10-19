@@ -1,7 +1,7 @@
 # flydigi-b9x-linux
 
 Flydigi B9X 폰 쿨러를 공식 앱(飞智游戏厅, `com.game.motionelf`) 없이
-Linux·Windows·macOS에서 BLE로 제어하기 위한 프로토콜 분석 작업.
+Linux·Windows·macOS에서 BLE로 제어하기 위한 프로토콜 분석과 CLI·GUI.
 
 ## 현재 상태
 
@@ -36,14 +36,28 @@ opcode 추측·퍼징은 하지 않는다.
 B9X 는 프레임 형식이 다르지만 같은 계열이라 미확인 opcode 는 위험한 것으로 취급한다.
 모르는 필드는 앱 캡처·화면 대조·정적 분석으로 푼다.
 
-## CLI
+## 구성
 
-`b9x/` 는 [bleak](https://github.com/hbldh/bleak) 기반 CLI 다. Linux(BlueZ)·macOS·Windows 에서 돈다.
+Rust workspace 다. BLE 백엔드와 GUI 툴킷은 운영체제마다 따로 둔다. 지금은 Linux 만 있다.
+
+| crate | 내용 |
+|---|---|
+| `crates/b9x-proto` | 프레임 코덱과 화이트리스트. 통신 코드 없음 |
+| `crates/b9x-ble` | 연결 유지, 알림 분배, 앱과 같은 다단계 변경(`control`). 백엔드: Linux `bluez`(bluer), 모의 기기 `fake` |
+| `crates/b9x-cli` | `b9x` CLI |
+| `crates/b9x-gui` | `b9x-gui`. GTK 4 + libadwaita (Linux) |
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install -e .
-.venv/bin/b9x scan                       # 주변 B9X 찾기
-export B9X_ADDRESS=9C:7F:64:C5:F4:83     # macOS 는 scan 이 보여주는 UUID
+sudo apt install libdbus-1-dev libgtk-4-dev libadwaita-1-dev pkg-config
+cargo build --release                    # target/release/b9x, target/release/b9x-gui
+cargo test
+```
+
+## CLI
+
+```sh
+b9x scan                                 # 주변 B9X 찾기
+export B9X_ADDRESS=9C:7F:64:C5:F4:83
 b9x status [--watch] [--json]
 b9x mode smart --preset silent           # smart: max·silent / fixed: energy·strong·max
 b9x mode custom --curve 5,5,5,6,7,8,8,8,8
@@ -52,28 +66,83 @@ b9x led breathing --speed fast --colors ff0000 0000ff --brightness 60
 b9x light off
 b9x shutdown 1h30m [--repeat] / b9x shutdown --off
 b9x oc on --yes
+b9x disconnect                           # 남은 BlueZ 연결 끊기 (기기에 아무것도 보내지 않음)
+b9x --fake status                        # 기기 없이 모의 기기로
 ```
+
+## GUI
+
+```sh
+b9x-gui [-a ADDRESS] [--fake]            # 주소는 -a, $B9X_ADDRESS, 스캔 순
+install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications/io.github.flydigib9x.B9X.desktop
+```
+
+냉면 온도 그래프, 모드·프리셋·Custom 커브, Quick switch, OC, 조명·LED 효과·색, 예약 종료를 다룬다.
+기기 상태가 1초마다 화면에 반영되고, 바꾼 값은 바로 기기로 보낸다(슬라이더는 멈춘 뒤 0.4초).
+OC 는 경고 창에서 확인해야 켜진다.
+
+## 동작 규칙
 
 기기는 연결을 하나만 받는다. 폰 앱이 백그라운드에서도 GATT 연결을 잡고 있으므로 앱을 강제 종료하거나 블루투스를 끈다.
 
-- 모든 쓰기는 `b9x/protocol.py` 의 `check_frame()` 을 거친다.
+- 모든 쓰기는 `b9x-proto` 의 `Frame::check()` 를 거친다. 백엔드는 `Frame` 만 받는다.
   캡처에서 확인한 opcode·값 범위가 아니면 보내지 않고 `UnsafeFrame` 으로 멈춘다.
   임의 프레임을 보내는 옵션은 두지 않는다.
+- LED 설정처럼 여러 프레임을 쓰는 변경은 모든 프레임을 검사한 뒤에 보낸다.
 - 모드를 바꾸면 앱처럼 Quick switch 를 직전 모드로 맞춘다.
 - 앱은 쓰기에 write without response 를 쓰지만, 특성 속성(`0x0a`)에 그 비트가 없어
-  macOS·BlueZ 가 거부할 수 있다. 그래서 기본은 write request 다(macOS 에서 동작 확인). `--write-cmd` 로 앱과 같게 보낼 수 있다.
+  macOS·BlueZ 가 거부할 수 있다. 그래서 기본은 write request 다. `--write-cmd` 로 앱과 같게 보낼 수 있다(BlueZ 에서 동작 확인).
 - Smart Control·Pulsating·Cyberpunk 는 앱이 설정 프레임을 보낸 적이 없어 선택만 된다.
 - Gradient 는 8색 쓰기만 캡처했다. 2–8색을 허용하지만 8색 미만은 미검증이다.
 - 예약 종료는 255분까지만 받는다. 분 값의 상위 바이트 순서를 확인하지 않았다.
 
-macOS 실기기에서 `oc on` 을 뺀 모든 명령을 확인했다 (모드·커브·Quick switch·조명·예약 종료·LED 단색/다색/Rhythm).
-Linux(BlueZ)는 아직 확인하지 않았다.
+macOS 실기기에서 Python CLI 로 `oc on` 을 뺀 모든 명령을 확인했다.
+Linux(BlueZ 5.82)에서 Rust CLI 로 `oc on` 을 뺀 모든 명령, GUI 로 연결·상태 표시를 확인했다.
 
 신호가 약하면(RSSI -70 근처) macOS 에서 link supervision timeout 으로 연결이 끊길 수 있다.
 
-테스트는 캡처한 앱 쓰기 전체를 화이트리스트에 대조한다.
+### Linux (BlueZ) 준비
+
+B9X 는 HID 서비스(`1812`)를 광고하지만 페어링을 거부한다(SMP Pairing Not Supported).
+BlueZ 의 HID 플러그인은 본딩 안 된 LE HID 기기에 연결하면 바로 페어링을 시도하고, 실패하면 연결을 끊는다.
+`/etc/bluetooth/input.conf` 에서 이 자동 보안 상향을 끈다.
+
+```ini
+[General]
+LEAutoSecurity=false
+```
 
 ```sh
+sudo systemctl restart bluetooth
+```
+
+이미 본딩된 키보드·마우스에는 영향이 없다(BlueZ `profiles/input/hog.c` 는 본딩 안 된 기기에만 이 값을 본다).
+
+그 밖의 BlueZ 동작:
+
+- 펌웨어 버전 push(`30 2e 33 2e 30 00`)는 CCCD 쓰기 응답보다 먼저 와서 bluetoothd 가 버린다. 그래서 Linux 에서는 `info` 의 firmware 가 `?` 다.
+  DIS(`180a`)의 Firmware Revision 은 "Firmware Revision" 이라는 글자만 들어 있다.
+- 프로세스가 연결을 닫지 않고 죽으면 BlueZ 가 링크를 유지해 폰 앱이 붙지 못한다.
+  CLI·GUI 는 Ctrl-C·SIGTERM·SIGHUP·파이프 끊김에도 연결을 닫는다. `kill -9` 뒤에는 `b9x disconnect`.
+- 페어링하지 않은 기기는 discovery 를 멈추면 BlueZ 가 지운다. 반대로 커널은 LE 연결을 스캔 주기(약 10초)가 끝날 때까지 미룬다.
+  그래서 광고를 본 뒤 Connect 를 보내고, 바로 discovery 를 멈춘다(`crates/b9x-ble/src/bluez.rs`).
+
+## 테스트
+
+캡처한 앱 쓰기 전체(`testdata/app_writes.txt`)를 화이트리스트에 대조한다. 모의 기기로 다단계 변경도 확인한다.
+
+```sh
+cargo test
+```
+
+### Python (deprecated)
+
+`b9x/` 는 [bleak](https://github.com/hbldh/bleak) 기반의 이전 CLI 다. Rust 로 옮겼고 더는 고치지 않는다.
+macOS·Windows 백엔드가 Rust 에 생길 때까지 참고용으로 둔다. 화이트리스트는 Rust 와 같아야 하고, 같은 `testdata/app_writes.txt` 로 테스트한다.
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install -e .
+.venv/bin/b9x status
 .venv/bin/python -m unittest discover -s tests
 ```
 
@@ -82,8 +151,11 @@ Linux(BlueZ)는 아직 확인하지 않았다.
 | 경로 | 내용 |
 |---|---|
 | `docs/protocol.md` | B9X 프로토콜 분석 기록 (확정·추정 구분) |
-| `b9x/` | CLI. `protocol.py` 가 코덱과 화이트리스트 |
-| `tests/` | 캡처 프레임으로 코덱·화이트리스트 검증 |
+| `crates/` | Rust 구현 (위 "구성") |
+| `testdata/app_writes.txt` | 앱이 보낸 쓰기 전체. Rust·Python 테스트가 같이 쓴다 |
+| `data/` | GUI 데스크톱 파일 |
+| `b9x/` | Python CLI (deprecated) |
+| `tests/` | Python 테스트 (deprecated) |
 | `tools/btsnoop_att.py` | btsnoop HCI 로그에서 LE 연결·특성 탐색·ATT write/notify 를 출력 (표준 라이브러리만 사용) |
 | `tools/pull_snoop.sh` | 태블릿의 HCI 로그를 `captures/` 로 복사하고 바로 파싱 |
 | `captures/` | 로그·APK 등 수집물. git 에 넣지 않는다 |
