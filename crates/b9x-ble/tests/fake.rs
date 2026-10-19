@@ -145,3 +145,20 @@ async fn led_speed_out_of_range_is_an_error() {
     let e = control::set_led(&dev, p::effect_by_name("breathing").unwrap(), &change).await.unwrap_err();
     assert!(matches!(e, Error::Invalid(_)), "{e}");
 }
+
+#[tokio::test]
+async fn wrong_mac_in_handshake_is_refused() {
+    // Answers as another device: nothing after the handshake may be written.
+    let opts = fake::Options { reported_mac: [1, 2, 3, 4, 5, 6], ..fake::Options::default() };
+    let e = Device::open(fake::connect_with(opts), false).await.err().expect("must refuse");
+    assert!(matches!(e, Error::NotB9x(_)), "{e}");
+}
+
+#[tokio::test]
+async fn unknown_product_id_is_a_warning() {
+    let dev = open().await;
+    assert_eq!(dev.identity_warning(), None);
+    let opts = fake::Options { product_id: [0x19, 0x31, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4], ..fake::Options::default() };
+    let dev = Device::open(fake::connect_with(opts), false).await.unwrap();
+    assert!(dev.identity_warning().is_some_and(|w| w.contains("19 31")));
+}

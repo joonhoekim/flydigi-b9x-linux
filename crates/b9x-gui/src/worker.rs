@@ -38,6 +38,8 @@ pub enum Event {
         address: String,
         version: Option<String>,
         mac: String,
+        /// The handshake had an unexpected product id.
+        warning: Option<String>,
     },
     /// None when the user asked for it.
     Disconnected(Option<String>),
@@ -169,7 +171,8 @@ async fn connect(address: Option<String>, fake: bool, events: &Sender<Event>) ->
     let send = |e: Event| async move {
         let _ = events.send(e).await;
     };
-    send(Event::Connected { address: d.address().to_string(), version: d.version(), mac }).await;
+    let warning = d.identity_warning().map(str::to_string);
+    send(Event::Connected { address: d.address().to_string(), version: d.version(), mac, warning }).await;
     send(Event::Led(d.led(0).await?)).await;
     send(Event::Curve(d.curve().await?)).await;
     send(Event::Shutdown(d.shutdown().await?)).await;

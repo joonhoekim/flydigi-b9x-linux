@@ -185,6 +185,14 @@ fn fixed_preset() {
 }
 
 #[test]
+fn handshake_reply() {
+    let hs = parse_handshake(&h("a5 a0 19 30 f0 f1 f2 f3 f4 83 f4 c5 64 7f 9c 00 00 00 00 03")).unwrap();
+    assert_eq!(hs, Handshake { product_id: B9X_PRODUCT_ID, mac: "9C:7F:64:C5:F4:83".into() });
+    assert!(parse_handshake(&h("a5 a0 19 30")).is_err());
+    assert!(parse_handshake(&h("24 83 f4 c5 64 7f 9c 00 00 00 00 00 00 00 00")).is_err());
+}
+
+#[test]
 fn replies() {
     assert_eq!(parse_mac(&h("24 83 f4 c5 64 7f 9c")).unwrap(), "9C:7F:64:C5:F4:83");
     assert_eq!(parse_curve(&h("22 04 05 05 05 06 07 08 08 08 08")).unwrap(), vec![5, 5, 5, 6, 7, 8, 8, 8, 8]);

@@ -68,6 +68,9 @@ pub enum Error {
     Disconnected(String),
     #[error("{0}")]
     NotFound(String),
+    /// Connected, but the device did not identify itself as the one we asked for.
+    #[error("{0}")]
+    NotB9x(String),
     #[error("bluetooth: {0}")]
     Ble(String),
 }
@@ -134,6 +137,7 @@ pub struct Device {
     state: watch::Receiver<LinkState>,
     version: Arc<StdMutex<Option<String>>>,
     written: StdMutex<Written>,
+    identity_warning: Option<String>,
 }
 
 /// Mode and quick switch we wrote last. Status pushes lag behind writes by a second
@@ -166,7 +170,7 @@ impl Device {
         let (state_tx, state_rx) = watch::channel(LinkState::Connected);
         let version = Arc::new(StdMutex::new(None));
         tokio::spawn(dispatch(link.events, debug, reply_tx, status_tx, state_tx, version.clone()));
-        let dev = Device {
+        let mut dev = Device {
             address: link.address,
             debug,
             requests: link.requests,
@@ -175,14 +179,47 @@ impl Device {
             state: state_rx,
             version,
             written: StdMutex::default(),
+            identity_warning: None,
         };
         // The device pushes its firmware version as ASCII right after subscribing.
-        dev.request(&p::HANDSHAKE, |f| f.starts_with(&p::HANDSHAKE[..2])).await?;
+        let reply = dev.request(&p::HANDSHAKE, |f| f.starts_with(&p::HANDSHAKE[..2])).await?;
+        // Nothing else is written until the device has identified itself.
+        if let Err(e) = dev.check_identity(&reply) {
+            dev.disconnect().await;
+            return Err(e);
+        }
         Ok(dev)
     }
 
     pub fn address(&self) -> &str {
         &self.address
+    }
+
+    /// Set when the device answered the handshake with an unexpected product id.
+    pub fn identity_warning(&self) -> Option<&str> {
+        self.identity_warning.as_deref()
+    }
+
+    /// The reply carries the device's own MAC; it must be the address we connected to.
+    /// The product id has only been seen on one unit, so a different one is a warning.
+    fn check_identity(&mut self, reply: &[u8]) -> Result<()> {
+        let hs = p::parse_handshake(reply).map_err(|e| Error::NotB9x(e.0))?;
+        // macOS gives a CoreBluetooth UUID instead of the MAC; nothing to compare there.
+        let is_mac = self.address.len() == 17 && self.address.bytes().filter(|&b| b == b':').count() == 5;
+        if is_mac && !hs.mac.eq_ignore_ascii_case(&self.address) {
+            return Err(Error::NotB9x(format!(
+                "{} answered the handshake as {}; not the B9X we connected to",
+                self.address, hs.mac
+            )));
+        }
+        if hs.product_id != p::B9X_PRODUCT_ID {
+            self.identity_warning = Some(format!(
+                "unexpected product id {} in the handshake (B9X: {}); this may not be a B9X",
+                p::hex(&hs.product_id),
+                p::hex(&p::B9X_PRODUCT_ID)
+            ));
+        }
+        Ok(())
     }
 
     pub fn version(&self) -> Option<String> {

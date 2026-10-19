@@ -16,6 +16,8 @@ pub const ADDRESS: &str = "00:00:00:00:B9:0F";
 const MAC_REV: [u8; 6] = [0x0f, 0xb9, 0, 0, 0, 0];
 
 struct State {
+    product_id: [u8; 7],
+    reported_mac: [u8; 6],
     mode: Mode,
     cold: u8,
     fan: u16,
@@ -67,6 +69,8 @@ impl State {
             })
             .collect();
         State {
+            product_id: b9x_proto::B9X_PRODUCT_ID,
+            reported_mac: MAC_REV,
             mode: Mode::Smart,
             cold: 145,
             fan: 4000,
@@ -152,8 +156,9 @@ impl State {
     fn write(&mut self, f: &[u8]) -> Vec<Vec<u8>> {
         match f[0] {
             0xa5 => {
-                let mut r = vec![0xa5, 0xa0, 0x19, 0x30, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4];
-                r.extend(MAC_REV);
+                let mut r = vec![0xa5, 0xa0];
+                r.extend(self.product_id);
+                r.extend(self.reported_mac);
                 r.extend([0, 0, 0, 0, 3]);
                 return vec![r];
             }
@@ -233,11 +238,21 @@ pub struct Options {
     /// Stored scheduled shutdown (repeat, enable, minutes), e.g. a value over 255
     /// minutes set by the phone app.
     pub shutdown: (bool, bool, u16),
+    /// Handshake reply after `a5 a0`, to act like some other device.
+    pub product_id: [u8; 7],
+    /// MAC the device reports about itself, byte-reversed as sent; normally [`ADDRESS`].
+    pub reported_mac: [u8; 6],
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { period: Duration::from_secs(1), status_lag: 0, shutdown: (false, false, 62) }
+        Options {
+            period: Duration::from_secs(1),
+            status_lag: 0,
+            shutdown: (false, false, 62),
+            product_id: b9x_proto::B9X_PRODUCT_ID,
+            reported_mac: MAC_REV,
+        }
     }
 }
 
@@ -252,6 +267,8 @@ pub fn connect_with(opts: Options) -> Link {
     tokio::spawn(async move {
         let mut state = State::new();
         state.shutdown = opts.shutdown;
+        state.product_id = opts.product_id;
+        state.reported_mac = opts.reported_mac;
         state.shutdown_left = if opts.shutdown.1 { opts.shutdown.2 } else { 0 };
         let mut history: VecDeque<Vec<u8>> = VecDeque::new();
         let _ = ev_tx.send(LinkEvent::Notify(pad(b"0.3.0\0".to_vec())));

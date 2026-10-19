@@ -43,11 +43,13 @@ async fn describe(adapter: &Adapter, addr: Address) -> Result<Found> {
     })
 }
 
+/// The B9X advertises service `ffe0` and sends "Flydigi B9X" in its scan response.
+/// `ffe0` alone is common (HM-10 style serial modules use it too), so both must match.
 async fn is_b9x(adapter: &Adapter, addr: Address) -> bool {
     let Ok(dev) = adapter.device(addr) else { return false };
     let name = dev.name().await.ok().flatten().unwrap_or_default();
     let service = dev.uuids().await.ok().flatten().is_some_and(|u| u.contains(&Uuid::from_u128(p::SERVICE_UUID)));
-    name.contains(NAME_HINT) || service
+    name.contains(NAME_HINT) && service
 }
 
 async fn set_le_filter(adapter: &Adapter) -> Result<()> {
@@ -129,13 +131,26 @@ fn flatten(r: Result<bluer::Result<()>, tokio::time::error::Elapsed>) -> Result<
 async fn connect_device(adapter: &Adapter, addr: Address, scan_timeout: Duration) -> Result<bluer::Device> {
     let dev = adapter.device(addr)?;
     if dev.is_connected().await.unwrap_or(false) {
+        // Typically a link left by a killed b9x. Check it is one before touching it:
+        // the error paths below disconnect, which must never hit e.g. a keyboard.
+        if !is_b9x(adapter, addr).await {
+            let name = dev.name().await.ok().flatten().unwrap_or_default();
+            return Err(Error::NotB9x(format!("{addr} ({name:?}) is connected but is not a B9X")));
+        }
         return Ok(dev);
     }
     set_le_filter(adapter).await?;
     let mut events = Box::pin(adapter.discover_devices_with_changes().await?);
     let deadline = Instant::now() + scan_timeout;
-    while dev.rssi().await.ok().flatten().is_none() {
+    // Wait for the advertisement and the scan response, which carries the name.
+    while dev.rssi().await.ok().flatten().is_none() || !is_b9x(adapter, addr).await {
         if !matches!(timeout_at(deadline, events.next()).await, Ok(Some(_))) {
+            if dev.rssi().await.ok().flatten().is_some() {
+                let name = dev.name().await.ok().flatten().unwrap_or_default();
+                return Err(Error::NotB9x(format!(
+                    "{addr} ({name:?}) does not advertise as a B9X (name with {NAME_HINT} and service ffe0)"
+                )));
+            }
             return Err(Error::NotFound(format!("{addr} not found; is it on and not connected to the phone app?")));
         }
     }

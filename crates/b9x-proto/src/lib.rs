@@ -412,9 +412,33 @@ pub fn parse_curve(f: &[u8]) -> Result<Vec<u8>, ValueError> {
     f.get(2..2 + CURVE_TEMPS.len()).map(<[u8]>::to_vec).ok_or_else(|| ValueError("short curve reply".into()))
 }
 
+fn mac_text(reversed: &[u8]) -> String {
+    reversed.iter().rev().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
+}
+
 pub fn parse_mac(f: &[u8]) -> Result<String, ValueError> {
-    let mac = f.get(1..7).ok_or_else(|| ValueError("short MAC reply".into()))?;
-    Ok(mac.iter().rev().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":"))
+    Ok(mac_text(f.get(1..7).ok_or_else(|| ValueError("short MAC reply".into()))?))
+}
+
+/// Bytes after `a5 a0` in the handshake reply of the one B9X seen so far. BS3 Pro
+/// coolers send `19 31 …`, so this looks like a product id; other B9X units may differ.
+pub const B9X_PRODUCT_ID: [u8; 7] = [0x19, 0x30, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Handshake {
+    pub product_id: [u8; 7],
+    /// The device's own address, sent byte-reversed.
+    pub mac: String,
+}
+
+/// `a5 a0 <product id × 7> <MAC reversed × 6> …` reply.
+pub fn parse_handshake(f: &[u8]) -> Result<Handshake, ValueError> {
+    if f.len() < 15 || f[..2] != HANDSHAKE[..2] {
+        return Err(ValueError("not a handshake reply".into()));
+    }
+    let mut product_id = [0; 7];
+    product_id.copy_from_slice(&f[2..9]);
+    Ok(Handshake { product_id, mac: mac_text(&f[9..15]) })
 }
 
 // --- whitelist ---------------------------------------------------------------

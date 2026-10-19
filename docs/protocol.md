@@ -31,7 +31,7 @@ notify 는 항상 20바이트로 오고, 유효 길이 뒤는 이전 버퍼 찌�
 <- 30 2e 33 2e 30 00                펌웨어 버전 ASCII "0.3.0" (요청 없이 옴)
 -> a5 a0 00 00                      핸드셰이크
 <- a5 a0 19 30 f0 f1 f2 f3 f4 | 83 f4 c5 64 7f 9c | 00 00 00 00 03
-                                    뒤쪽 6바이트는 MAC 역순
+                                    뒤쪽 6바이트는 MAC 역순 (연결 확인에 쓴다)
 -> 51 00                            현재 LED 설정 조회
 -> 22 04  <- 22 04 05 05 05 06 07 08 08 08 08     Custom 커브 조회
 -> 24 00  <- 24 83 f4 c5 64 7f 9c                  MAC 조회 (역순). B6 와 같음
@@ -50,6 +50,8 @@ BS3 Pro 펌웨어의 `0x0B` 응답도 `19 31 f0 f1 f2 f3 f4` + MAC 이다 (ElXre
 펌웨어 버전 push 는 CCCD 쓰기의 Write Response 보다 먼저 온다(btmon, BlueZ 5.82).
 bluetoothd 는 구독이 끝나기 전에 온 알림을 버려서 Linux 에서는 버전을 받지 못한다.
 DIS(`180a`)의 `2a24`–`2a28` 은 "Firmware Revision" 처럼 항목 이름만 들어 있다.
+
+광고: AD `16-bit Service UUIDs (partial)` 에 `ffe0` 하나, scan response 에 `Name (complete): Flydigi B9X`.
 
 연결 직후 SMP 페어링 요청에는 `Pairing Not Supported` 로 답한다. HID 서비스가 있어도 암호화 없이 쓴다.
 

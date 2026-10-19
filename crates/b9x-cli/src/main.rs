@@ -436,6 +436,9 @@ async fn main_async(cli: Cli) -> Result<(), CliError> {
             return Ok(());
         }
     };
+    if let Some(w) = dev.identity_warning() {
+        eprintln!("b9x: warning: {w}");
+    }
     let mut work = std::pin::pin!(run(&cli, &dev));
     let result = tokio::select! {
         r = &mut work => r,

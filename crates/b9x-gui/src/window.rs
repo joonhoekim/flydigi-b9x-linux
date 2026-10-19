@@ -704,7 +704,10 @@ impl Ui {
                 self.busy_label.set_label(&msg);
                 self.stack.set_visible_child_name("busy");
             }
-            Event::Connected { address, version, mac } => {
+            Event::Connected { address, version, mac, warning } => {
+                if let Some(w) = warning {
+                    self.toast(&w);
+                }
                 set_row_value(&self.address_row, &address);
                 set_row_value(&self.firmware_row, version.as_deref().unwrap_or("not reported"));
                 set_row_value(&self.mac_row, &mac);
