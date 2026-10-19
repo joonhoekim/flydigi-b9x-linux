@@ -239,8 +239,10 @@ impl Ui {
             .subtitle("Long press on the power button toggles to this mode")
             .build();
         quick_row.add_suffix(&quick_group);
-        let oc_row =
-            adw::SwitchRow::builder().title("OC Experience").subtitle("Full power, frost protection off").build();
+        let oc_row = adw::SwitchRow::builder()
+            .title("OC Experience")
+            .subtitle("Full power, frost protection off. Ends when disconnected")
+            .build();
         let cooling = adw::PreferencesGroup::builder().title("Cooling").build();
         cooling.add(&mode_row);
         cooling.add(&preset_row);

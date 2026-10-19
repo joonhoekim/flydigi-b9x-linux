@@ -119,7 +119,8 @@ enum Command {
     Curve,
     /// Lighting on/off
     Light { state: Option<OnOff> },
-    /// OC Experience (full power, frost protection off)
+    /// OC Experience (full power, frost protection off). The cooler ends OC when the
+    /// connection drops, so `oc on` stays connected and shows status until Ctrl-C
     Oc {
         state: Option<OnOff>,
         #[arg(long)]
@@ -342,7 +343,19 @@ async fn run(cli: &Cli, dev: &Device) -> Result<(), CliError> {
         Command::Light { state: None } => out(line(on_off(dev.status().await?.light)))?,
         Command::Light { state: Some(s) } => control::set_light(dev, *s == OnOff::On).await?,
         Command::Oc { state: None, .. } => out(line(on_off(dev.status().await?.overclock)))?,
-        Command::Oc { state: Some(s), yes } => control::set_overclock(dev, *s == OnOff::On, *yes).await?,
+        Command::Oc { state: Some(OnOff::On), yes } => {
+            control::set_overclock(dev, true, *yes).await?;
+            eprintln!("OC on until Ctrl-C (the cooler ends it when the connection drops)");
+            loop {
+                let s = dev.status().await?;
+                let oc = if s.overclock { "" } else { "  (OC off)" };
+                out(line(format_args!(
+                    "cold plate {:5.1} °C  output {:3}  fan {} rpm{oc}",
+                    s.cold_temp, s.output, s.fan_rpm
+                )))?;
+            }
+        }
+        Command::Oc { state: Some(OnOff::Off), .. } => control::set_overclock(dev, false, true).await?,
         Command::Shutdown { minutes: None, off: false, .. } => out(shutdown_text(&dev.shutdown().await?))?,
         Command::Shutdown { minutes, off, repeat } => {
             let schedule = if *off { None } else { minutes.map(|m| (m, *repeat)) };
@@ -443,7 +456,7 @@ async fn main_async(cli: Cli) -> Result<(), CliError> {
     let result = tokio::select! {
         r = &mut work => r,
         _ = interrupted() => match cli.command {
-            Command::Status { .. } => Ok(()),
+            Command::Status { .. } | Command::Oc { state: Some(OnOff::On), .. } => Ok(()),
             // Let a change of several frames finish so the device is not left half
             // set. Its replies time out within seconds; a second signal stops at once.
             _ => tokio::select! {
@@ -452,6 +465,10 @@ async fn main_async(cli: Cli) -> Result<(), CliError> {
             },
         },
     };
+    if let Command::Oc { state: Some(OnOff::On), yes: true } = cli.command {
+        // Disconnecting ends OC too, but say so explicitly while we still can.
+        let _ = control::set_overclock(&dev, false, true).await;
+    }
     dev.disconnect().await;
     result
 }

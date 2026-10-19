@@ -4,6 +4,7 @@ description = "Command line control for the Flydigi B9X phone cooler"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "b9x"

@@ -37,7 +37,9 @@ cargo clippy --all-targets
 - 모드를 바꾸면 앱처럼 Quick switch 를 직전 모드로 맞춘다.
 - 상태 push 는 쓰기 뒤 1–2초 동안 옛 값을 보낸다. 쓰기 직후의 판단(직전 모드, Quick switch)은 방금 쓴 값을 기준으로 한다(최대 5초).
 - Custom 커브 프레임(`20 04 …`)은 Custom 으로 전환도 하므로 Custom 모드에서만 보낸다.
-- Smart Control·Pulsating·Cyberpunk 는 앱이 선택만 했으므로 설정은 못 바꾼다.
+- Smart Control·Pulsating·Cyberpunk 는 앱에도 설정이 없다. 앱처럼 선택만 한다.
+- 쿨러는 연결이 끊기면 OC Experience 를 끝낸다. 그래서 `b9x oc on` 은 중단할 때까지 연결을 유지하고, 중단하면 OC 를 끈다.
+  GUI 는 연결돼 있는 동안 유지한다.
 - Gradient 는 8색 쓰기만 캡처했다. 2–8색을 허용하지만 8색 미만은 미검증이다.
 - 예약 종료 분은 1바이트(최대 255)로 보낸다. 더 큰 값의 바이트 순서를 확인하지 않았다.
   폰 앱이 더 길게 설정한 예약을 끌 때는 255로 저장된다.

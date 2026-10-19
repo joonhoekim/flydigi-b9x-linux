@@ -4,6 +4,7 @@ description = "Flydigi B9X connection: per-OS BLE backend, reply dispatch and ap
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 b9x-proto.workspace = true

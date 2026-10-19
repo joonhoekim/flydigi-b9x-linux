@@ -40,7 +40,9 @@ cargo clippy --all-targets
 - Status pushes show old values for 1–2 s after a write. Decisions right after a write
   (previous mode, Quick switch) use the values just written, for up to 5 s.
 - The Custom curve frame (`20 04 …`) also switches to Custom, so it is only sent in Custom mode.
-- Smart Control, Pulsating and Cyberpunk were only ever selected by the app, so they cannot be configured.
+- Smart Control, Pulsating and Cyberpunk have no settings in the app; it only selects them, and so do we.
+- The cooler ends OC Experience when the connection drops, so `b9x oc on` stays connected
+  until interrupted, then turns OC off. The GUI keeps it on while connected.
 - Gradient was only captured with 8 colours; 2–8 are allowed, fewer than 8 is untested.
 - Scheduled shutdown minutes go out as one byte (255 max): the byte order of larger
   values is unconfirmed. Switching off a longer duration set by the phone app stores 255.

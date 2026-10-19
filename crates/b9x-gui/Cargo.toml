@@ -4,6 +4,7 @@ description = "GTK 4 / libadwaita front end for the Flydigi B9X phone cooler (Li
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "b9x-gui"

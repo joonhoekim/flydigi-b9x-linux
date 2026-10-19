@@ -66,7 +66,7 @@ b9x quick-switch fixed
 b9x led breathing --speed fast --colors ff0000 0000ff --brightness 60
 b9x light off
 b9x shutdown 1h30m [--repeat]  |  b9x shutdown --off
-b9x oc on --yes                           # full power, frost protection off
+b9x oc on --yes                           # full power, frost protection off; until Ctrl-C
 b9x disconnect                            # drop a link left by a killed b9x
 b9x --fake status                         # simulated device, no hardware needed
 ```
@@ -79,9 +79,8 @@ install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications
 ## Limitations
 
 - Linux does not show the firmware version: BlueZ drops the version push (see the BlueZ notes).
-- Smart Control, Pulsating and Cyberpunk effects can only be selected, not configured.
 - Scheduled shutdown is limited to 255 minutes.
-- `oc on` has not been tested on the device.
+- OC Experience lasts only while connected: the cooler ends it when the connection drops.
 
 ## Documentation
 
@@ -98,4 +97,4 @@ install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications
 
 ## License
 
-No license has been chosen yet.
+[MIT](LICENSE)

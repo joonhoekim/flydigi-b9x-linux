@@ -65,7 +65,7 @@ b9x quick-switch fixed
 b9x led breathing --speed fast --colors ff0000 0000ff --brightness 60
 b9x light off
 b9x shutdown 1h30m [--repeat]  |  b9x shutdown --off
-b9x oc on --yes                           # 최고 출력, 과냉각 보호 해제
+b9x oc on --yes                           # 최고 출력, 과냉각 보호 해제. Ctrl-C 까지
 b9x disconnect                            # 강제 종료된 b9x 가 남긴 연결 끊기
 b9x --fake status                         # 모의 기기. 하드웨어 없이 시험
 ```
@@ -78,9 +78,8 @@ install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications
 ## 제한
 
 - Linux 에서는 펌웨어 버전을 보여주지 못한다. BlueZ 가 버전 push 를 버린다(BlueZ 문서 참고).
-- Smart Control·Pulsating·Cyberpunk 효과는 선택만 되고 설정은 못 바꾼다.
 - 예약 종료는 255분까지다.
-- `oc on` 은 실기기에서 시험하지 않았다.
+- OC Experience 는 연결돼 있는 동안만 유지된다. 연결이 끊기면 쿨러가 끝낸다.
 
 ## 문서
 
@@ -97,4 +96,4 @@ install -Dm644 data/io.github.flydigib9x.B9X.desktop ~/.local/share/applications
 
 ## 라이선스
 
-아직 정하지 않았다.
+[MIT](LICENSE)

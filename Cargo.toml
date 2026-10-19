@@ -6,6 +6,7 @@ members = ["crates/*"]
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
+license = "MIT"
 
 [workspace.dependencies]
 b9x-proto = { path = "crates/b9x-proto" }

@@ -5,6 +5,7 @@ name = "b9x"
 version = "0.1.0"
 description = "Control the Flydigi B9X phone cooler over BLE"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = ["bleak>=0.22"]
 
 [project.scripts]
