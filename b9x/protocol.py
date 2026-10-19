@@ -197,6 +197,7 @@ class Status:
     effect: int
     quick_switch: int
     overclock: bool
+    shutdown_left: int       # minutes until scheduled shutdown, 0 = off
 
     def preset_name(self):
         mode = MODE_NAMES.get(self.mode)
@@ -230,6 +231,7 @@ def parse_status(f):
         effect=f[15],
         quick_switch=f[16],
         overclock=bool(f[17] & 0x80),
+        shutdown_left=f[18] * 256 + f[19] if len(f) >= 20 else 0,
     )
 
 

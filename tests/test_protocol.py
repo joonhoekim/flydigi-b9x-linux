@@ -338,6 +338,9 @@ class Status(unittest.TestCase):
         self.assertTrue(s.light)
         self.assertEqual(s.quick_switch, p.FIXED)
         self.assertFalse(s.overclock)
+        self.assertEqual(s.shutdown_left, 0)
+        s = p.parse_status(h('13 00 02 91 28 00 06 06 00 21 37 82 27 3c ff 0c 04 03 00 77'))
+        self.assertEqual(s.shutdown_left, 119)
 
     def test_negative_temps(self):
         # app screen value, [7], [8]

@@ -123,6 +123,7 @@ def status_dict(s):
         'effect': getattr(p.EFFECT_BY_CODE.get(s.effect), 'name', s.effect),
         'quick_switch': p.MODE_NAMES.get(s.quick_switch, s.quick_switch),
         'overclock': s.overclock,
+        'shutdown_left': s.shutdown_left,
     }
 
 
@@ -138,6 +139,8 @@ def print_status(s):
     print('light         %s, effect %s' % ('on' if s.light else 'off', effect_label(s.effect)))
     print('quick switch  %s' % d['quick_switch'])
     print('OC            %s' % ('on' if s.overclock else 'off'))
+    if s.shutdown_left:
+        print('shutdown in   %dh%02dm' % divmod(s.shutdown_left, 60))
 
 
 def print_led(s):
