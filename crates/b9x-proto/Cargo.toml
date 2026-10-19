@@ -1,0 +1,6 @@
+[package]
+name = "b9x-proto"
+description = "Flydigi B9X frame codec and whitelist"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true

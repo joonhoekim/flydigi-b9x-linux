@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
+
+[workspace.dependencies]
+b9x-proto = { path = "crates/b9x-proto" }
+b9x-ble = { path = "crates/b9x-ble" }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }
+futures = "0.3"

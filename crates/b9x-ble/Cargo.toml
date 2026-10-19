@@ -1,0 +1,15 @@
+[package]
+name = "b9x-ble"
+description = "Flydigi B9X connection: per-OS BLE backend, reply dispatch and app-like control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+b9x-proto.workspace = true
+tokio.workspace = true
+futures.workspace = true
+thiserror = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+bluer = { version = "0.17", features = ["bluetoothd"] }

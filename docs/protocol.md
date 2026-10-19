@@ -47,6 +47,12 @@ BS3 Pro 펌웨어의 `0x0B` 응답도 `19 31 f0 f1 f2 f3 f4` + MAC 이다 (ElXre
 
 `13` 을 보내지 않아도 상태 프레임이 약 1초마다 push 된다.
 
+펌웨어 버전 push 는 CCCD 쓰기의 Write Response 보다 먼저 온다(btmon, BlueZ 5.82).
+bluetoothd 는 구독이 끝나기 전에 온 알림을 버려서 Linux 에서는 버전을 받지 못한다.
+DIS(`180a`)의 `2a24`–`2a28` 은 "Firmware Revision" 처럼 항목 이름만 들어 있다.
+
+연결 직후 SMP 페어링 요청에는 `Pairing Not Supported` 로 답한다. HID 서비스가 있어도 암호화 없이 쓴다.
+
 ## 상태 프레임 `13` (20바이트, 1 Hz)
 
 예: `13 00 02 91 28 00 06 08 04 2a 2d c9 25 32 ff 0c 01 03 00 00`

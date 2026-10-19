@@ -1,0 +1,17 @@
+[package]
+name = "b9x-cli"
+description = "Command line control for the Flydigi B9X phone cooler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "b9x"
+path = "src/main.rs"
+
+[dependencies]
+b9x-proto.workspace = true
+b9x-ble.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+serde_json = { version = "1", features = ["preserve_order"] }

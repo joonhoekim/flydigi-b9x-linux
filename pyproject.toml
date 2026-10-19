@@ -1,3 +1,5 @@
+# Deprecated Python implementation. The maintained code is the Rust workspace
+# (Cargo.toml, crates/); see README.
 [project]
 name = "b9x"
 version = "0.1.0"

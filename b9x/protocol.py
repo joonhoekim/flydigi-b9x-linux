@@ -1,5 +1,10 @@
 """B9X frame codec and the whitelist of frames the official app was seen sending.
 
+Deprecated: superseded by the Rust workspace in crates/ (b9x-proto, b9x-ble,
+b9x-cli, b9x-gui). Kept for reference and for macOS/Windows until those get a
+Rust backend; new work goes to the Rust code. The Rust whitelist
+(crates/b9x-proto) must stay identical; both test against testdata/app_writes.txt.
+
 Every frame that goes to the device passes through `check_frame()`. It only
 accepts the opcodes and value ranges recorded in docs/protocol.md; anything
 else raises `UnsafeFrame`. Some Flydigi firmware erases itself on unknown
